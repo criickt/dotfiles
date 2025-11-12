@@ -1,6 +1,6 @@
 { inputs, username, ... }:
 let
-  homeDirectory = "/data/data/com.termux/files/home";
+  homeDirectory = "/home/${username}";
   lib = inputs.nixpkgs.lib;
   system = "aarch64-linux";
   pkgs = import inputs.nixpkgs { inherit system; };

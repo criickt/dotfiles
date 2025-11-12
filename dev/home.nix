@@ -4,7 +4,7 @@ let
   personalFile =
     "${config.home.homeDirectory}/.config/home-manager/personal.nix";
   personal = if builtins.pathExists personalFile then
-    import personalFile
+    import personalFile { inherit homeDirectory; }
   else {
     ssh_match_blocks = { };
     git_includes = [ ];
