@@ -1,4 +1,4 @@
-{ inputs, username, ... }:
+{ inputs, username, profile ? "admin", ... }:
 let
   homeDirectory = "/home/${username}";
   lib = inputs.nixpkgs.lib;
@@ -16,5 +16,5 @@ in inputs.home-manager.lib.homeManagerConfiguration {
     inherit nixgl;
   };
 
-  modules = [ inputs.stylix.homeModules.stylix ./home.nix ];
+  modules = [ inputs.stylix.homeModules.stylix ./${profile}.nix ];
 }

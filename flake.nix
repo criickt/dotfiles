@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "nixpkgs/557f25ca18370029c7f641a7f7dfcf5612687d23";
+    nixpkgs.url = "nixpkgs/bde09022887110deb780067364a0818e89258968";
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -18,6 +18,7 @@
   outputs = inputs@{ ... }:
     let
       linuxUser = "admin";
+      workUser = "work";
       androidUser = "u0_a305";
     in {
       homeConfigurations = {
@@ -28,6 +29,12 @@
         "${linuxUser}@linux" = import ./linux {
           inherit inputs;
           username = linuxUser;
+          profile = "admin";
+        };
+        "${workUser}@linux" = import ./linux {
+          inherit inputs;
+          username = workUser;
+          profile = "work";
         };
       };
     };

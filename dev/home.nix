@@ -1,40 +1,118 @@
-{ inputs, username, homeDirectory, config, lib, pkgs, ... }:
+{
+  inputs,
+  username,
+  homeDirectory,
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
-  personalFile =
-    "${config.home.homeDirectory}/.config/home-manager/personal.nix";
-  personal = if builtins.pathExists personalFile then
-    import personalFile { inherit homeDirectory; }
-  else {
-    ssh_match_blocks = { };
-    git_includes = [ ];
-    git_extra = { };
-  };
-in {
-
-  home.sessionVariables = { CARGO_HOME = "$HOME/.cache/cargo"; };
-  home.packages = with pkgs; [ age devenv fzf htop jaq ripgrep tlrc tree ];
-  home.file = {
-    ".config/git/ignore_misc".text = lib.concatStringsSep "\n" [
-      ".claude/"
-      ".devenv*"
-      ".direnv*"
-      ".envrc"
-      ".helix/"
-      ".pre-commit-config.yaml"
-      "devenv*"
-      "direnv*"
+  personalFile = "${homeDirectory}/.config/personal.nix";
+  gitHooksPath = "~/.config/git/hooks";
+  isTermux =
+    pkgs.stdenv.hostPlatform.isAarch64
+    && !config.systemd.user.enable
+    && !config.targets.genericLinux.gpu.enable;
+in
+{
+  imports = lib.optional (builtins.pathExists personalFile) personalFile;
+  nix = {
+    package = pkgs.nix;
+    settings.experimental-features = [
+      "nix-command"
+      "flakes"
     ];
   };
 
+  home = {
+    preferXdgDirectories = true;
+    sessionVariables = {
+      CARGO_HOME = "$HOME/.cache/cargo";
+      GRADLE_USER_HOME = "$HOME/.cache";
+      BUILDAH_FORMAT = "docker";
+      DOCKER_CONFIG = "$HOME/.config/docker";
+    };
+    shellAliases = {
+      jq = "jaq";
+    };
+  };
+
+  home.packages =
+    with pkgs;
+    [
+      age
+      devenv
+      fzf
+      jaq
+      ripgrep
+      tlrc
+      tree
+      witr
+    ]
+    ++ lib.optionals (!isTermux) [ podman-compose ];
+
+  services.podman = lib.mkIf (!isTermux) {
+    enable = true;
+    settings.storage = {
+      storage.options.overlay = {
+        ignore_chown_errors = "true";
+      };
+    };
+  };
+
+  xdg.configFile."direnv/direnvrc".text = ''
+    export GIT_CONFIG_PARAMETERS="'core.hooksPath='"
+  '';
+
   programs = {
     home-manager.enable = true;
+    claude-code = {
+      enable = true;
+      package = pkgs.claude-code.overrideAttrs (old: rec {
+        version = "2.0.64";
+        src = pkgs.fetchurl {
+          url = "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-${version}.tgz";
+          hash = "sha256-H75i1x580KdlVjKH9V6a2FvPqoREK004CQAlB3t6rZ0=";
+        };
+        packageLock = pkgs.fetchurl {
+          url = "https://raw.githubusercontent.com/NixOS/nixpkgs/d81147f1f1f508c6a62b7182b991aa1500e48cbe/pkgs/by-name/cl/claude-code/package-lock.json";
+          hash = "sha256-u3zwMA/I/Np/DD2JDZyoKqByx+gP6c3EZvc+v+c42xA=";
+        };
+        npmDepsHash = "sha256-x1YerDQP1+kNS+mdIqSAE1e81fsd855KdJM+VBxaUBQ=";
+        npmDeps = pkgs.fetchNpmDeps {
+          inherit src;
+          name = "${old.pname}-${version}-npm-deps";
+          hash = npmDepsHash;
+          postPatch = ''
+            cp ${packageLock} package-lock.json
+          '';
+        };
+        postPatch = ''
+          cp ${packageLock} package-lock.json
+          substituteInPlace cli.js \
+            --replace-warn '#!/bin/bash' '#!/usr/bin/env bash'
+        '';
+      });
+    };
     delta = {
       enable = true;
       enableGitIntegration = true;
     };
     git = {
       enable = true;
+      package = pkgs.symlinkJoin {
+        name = "git-with-hooks";
+        paths = [ pkgs.git ];
+        postBuild = ''
+          rm $out/bin/git
+          ln -s ${pkgs.writeShellScript "git-wrapper" ''
+            export GIT_CONFIG_PARAMETERS="'core.hooksPath=${gitHooksPath}'"
+            exec ${pkgs.git}/bin/git "$@"
+          ''} $out/bin/git
+        '';
+      };
       ignores = [
         "*.env"
         "/env/"
@@ -44,13 +122,14 @@ in {
         ".pre-commit-config.yaml"
       ];
       lfs.enable = true;
-      settings = personal.git_extra // {
-        user.email = "johndoe@example.com";
-        user.name = "John Doe";
+      settings = {
+        user.email = lib.mkDefault "johndoe@example.com";
+        user.name = lib.mkDefault "John Doe";
         column.ui = "auto";
         branch.sort = "-committerdate";
         tag.sort = "version:refname";
         init.defaultBranch = "main";
+        core.hooksPath = gitHooksPath;
         diff = {
           algorithm = "histogram";
           mnemonicPrefix = true;
@@ -78,13 +157,13 @@ in {
           updateRefs = true;
         };
       };
-      includes = personal.git_includes;
+      includes = [ ];
     };
     gitui.enable = true;
     ssh = {
       enable = true;
       enableDefaultConfig = false;
-      matchBlocks = personal.ssh_match_blocks // {
+      matchBlocks = {
         "*" = {
           addKeysToAgent = "yes";
           identitiesOnly = true;
@@ -121,14 +200,16 @@ in {
           "A-e" = "normal_mode";
           "A-tab" = ":buffer-next";
         };
-        keys.select = { "A-tab" = ":buffer-next"; };
+        keys.select = {
+          "A-tab" = ":buffer-next";
+        };
       };
       languages = {
         language = [
           {
             name = "nix";
             auto-format = true;
-            formatter.command = "${pkgs.nixfmt-classic}/bin/nixfmt";
+            formatter.command = "${pkgs.nixfmt}/bin/nixfmt";
           }
           {
             name = "json";
@@ -145,7 +226,11 @@ in {
     yazi = {
       enable = true;
       enableZshIntegration = true;
-      settings = { mgr = { show_hidden = true; }; };
+      settings = {
+        mgr = {
+          show_hidden = true;
+        };
+      };
       initLua = ''
         Status:children_add(function()
         	local h = cx.active.current.hovered
@@ -166,7 +251,15 @@ in {
       enable = true;
       enableCompletion = true;
       autosuggestion.enable = true;
-      localVariables = { ZSH_COMPDUMP = "$HOME/.cache/.zcompdump-$HOST"; };
+      dotDir = "${config.xdg.configHome}/zsh";
+      envExtra = ''
+        # global git hooks
+        fpath+=($HOME/.nix-profile/share/zsh/site-functions)
+        autoload -Uz git
+      '';
+      localVariables = {
+        ZSH_COMPDUMP = "$HOME/.cache/.zcompdump-$HOST";
+      };
       history = {
         share = false;
         append = true;
@@ -175,15 +268,16 @@ in {
         ignoreSpace = true;
         extended = true;
       };
-      initContent = let
-        zshConfig = lib.mkOrder 1500 ''
-          eval "$(fzf --zsh| sed -e '/zmodload/s/perl/perl_off/' -e '/selected/s/fc -rl/fc -rlt "%y-%m-%d"/')"'';
-      in lib.mkMerge [ zshConfig ];
+      initContent =
+        let
+          zshConfig = lib.mkOrder 1500 ''eval "$(fzf --zsh| sed -e '/zmodload/s/perl/perl_off/' -e '/selected/s/fc -rl/fc -rlt "%y-%m-%d"/')"'';
+        in
+        lib.mkMerge [ zshConfig ];
       siteFunctions = {
-        gclone = ''
-          gitstrip="''${1#*:}"; gitpath="''${gitstrip%.git}"; git clone "$1" "''${gitpath%.git}"'';
+        gclone = ''gitstrip="''${1#*:}"; gitpath="''${gitstrip%.git}"; git clone "$1" "''${gitpath%.git}"'';
         mkcd = ''mkdir --parents "$1" && cd "$1"'';
         tch = ''mkdir --parents "$(dirname "$@")" && touch "$@"'';
+        git = ''GIT_CONFIG_PARAMETERS="'core.hooksPath=${gitHooksPath}'" command git "$@"'';
       };
       prezto = {
         enable = false;
@@ -192,7 +286,10 @@ in {
       };
       oh-my-zsh = {
         enable = true;
-        plugins = [ "git" "fzf" ];
+        plugins = [
+          "git"
+          "fzf"
+        ];
         theme = "kardan";
       };
     };
@@ -200,5 +297,10 @@ in {
       enable = true;
       enableZshIntegration = false;
     };
+  };
+
+  manual = {
+    html.enable = true;
+    json.enable = true;
   };
 }

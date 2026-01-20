@@ -1,11 +1,16 @@
-{ inputs, username, homeDirectory, config, lib, pkgs, ... }:
+{
+  inputs,
+  username,
+  homeDirectory,
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 {
   imports = [ ../dev/home.nix ];
-  nix = {
-    package = pkgs.nix;
-    settings.experimental-features = [ "nix-command" "flakes" ];
-  };
+
   targets.genericLinux = {
     enable = true;
     gpu.enable = false;
@@ -14,7 +19,9 @@
   home.username = username;
   home.homeDirectory = homeDirectory;
 
-  nixpkgs.config = { users.defaultUserShell = pkgs.zsh; };
+  nixpkgs.config = {
+    users.defaultUserShell = pkgs.zsh;
+  };
   home.stateVersion = "25.05"; # Please read the comment before changing.
 
   home.sessionVariables = {
@@ -62,14 +69,14 @@
 
   programs = {
     home-manager.enable = true;
-    claude-code.enable = true;
     zsh = {
-      initContent = let
-        localBin = lib.mkOrder 1500 ''export PATH="$HOME/.local/bin:$PATH"'';
-      in lib.mkMerge [ localBin ];
+      initContent =
+        let
+          localBin = lib.mkOrder 1500 ''export PATH="$HOME/.local/bin:$PATH"'';
+        in
+        lib.mkMerge [ localBin ];
       shellAliases = {
-        hmu =
-          "nix flake update --flake ~/.config/home-manager && NIXPKGS_ALLOW_UNFREE=1 home-manager switch --flake ~/.config/home-manager#${username}@android --impure";
+        hmu = "nix flake update --flake ~/.config/home-manager && NIXPKGS_ALLOW_UNFREE=1 home-manager switch --flake ~/.config/home-manager#${username}@android --impure && nix profile wipe-history && home-manager expire-generations '-1 second' && nix-collect-garbage";
       };
     };
 
@@ -78,6 +85,8 @@
   systemd.user.enable = false;
   qt.enable = false;
   xdg.portal.enable = false;
+
+  news.display = "silent";
 
   stylix = {
     enable = true;
