@@ -11,6 +11,15 @@
 let
   personalFile = "${homeDirectory}/.config/personal.nix";
   gitHooksPath = "~/.config/git/hooks";
+  gitHooksWrapper = pkgs.writeShellScript "git-hooks-wrapper" ''
+    GIT="$1"; shift
+    case "$1" in
+      commit|merge|push|pull|checkout|switch|rebase|am|cherry-pick|revert)
+        export GIT_CONFIG_PARAMETERS="'core.hooksPath=${gitHooksPath}'"
+        ;;
+    esac
+    exec "$GIT" "$@"
+  '';
   isTermux =
     pkgs.stdenv.hostPlatform.isAarch64
     && !config.systemd.user.enable
@@ -62,9 +71,6 @@ in
     };
   };
 
-  xdg.configFile."direnv/direnvrc".text = ''
-    export GIT_CONFIG_PARAMETERS="'core.hooksPath='"
-  '';
 
   programs = {
     home-manager.enable = true;
@@ -108,8 +114,7 @@ in
         postBuild = ''
           rm $out/bin/git
           ln -s ${pkgs.writeShellScript "git-wrapper" ''
-            export GIT_CONFIG_PARAMETERS="'core.hooksPath=${gitHooksPath}'"
-            exec ${pkgs.git}/bin/git "$@"
+            exec ${gitHooksWrapper} ${pkgs.git}/bin/git "$@"
           ''} $out/bin/git
         '';
       };
@@ -129,7 +134,6 @@ in
         branch.sort = "-committerdate";
         tag.sort = "version:refname";
         init.defaultBranch = "main";
-        core.hooksPath = gitHooksPath;
         diff = {
           algorithm = "histogram";
           mnemonicPrefix = true;
@@ -277,7 +281,7 @@ in
         gclone = ''gitstrip="''${1#*:}"; gitpath="''${gitstrip%.git}"; git clone "$1" "''${gitpath%.git}"'';
         mkcd = ''mkdir --parents "$1" && cd "$1"'';
         tch = ''mkdir --parents "$(dirname "$@")" && touch "$@"'';
-        git = ''GIT_CONFIG_PARAMETERS="'core.hooksPath=${gitHooksPath}'" command git "$@"'';
+        git = ''${gitHooksWrapper} "$(whence -p git)" "$@"'';
       };
       prezto = {
         enable = false;
