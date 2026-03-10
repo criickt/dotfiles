@@ -21,12 +21,16 @@
     stateVersion = "25.05";
     sessionVariables = {
       TERM = "xterm-256color";
-      SSH_AUTH_SOCK = "/tmp/work-ssh-agent.sock";
+      SUDO_EDITOR = "$HOME/.nix-profile/bin/hx";
     };
     shellAliases = {
-      hmu = "NIXPKGS_ALLOW_UNFREE=1 home-manager switch --flake ~/.config/home-manager#work@linux --impure";
+      hmu = "NIXPKGS_ALLOW_UNFREE=1 home-manager switch --flake 'path:${homeDirectory}/.config/home-manager#work@linux' --impure";
     };
   };
+
+  home.packages = with pkgs; [
+    fastfetch
+  ];
 
   systemd.user = {
     enable = true;
@@ -35,7 +39,6 @@
   };
 
   services = {
-    ssh-agent.enable = false; # using admin's proxied agent
     home-manager.autoExpire = {
       enable = true;
       frequency = "weekly";
@@ -44,10 +47,19 @@
     };
   };
 
-  programs.zsh = {
+  programs = {
+    helix.settings.theme = lib.mkForce "nyxvamp-obsidian";
+    zsh = {
+      enable = true;
+      initContent = lib.mkBefore ''
+        ZSH_DISABLE_COMPFIX=true
+      '';
+    };
+  };
+
+  stylix = {
     enable = true;
-    initContent = lib.mkBefore ''
-      ZSH_DISABLE_COMPFIX=true
-    '';
+    base16Scheme = "${pkgs.base16-schemes}/share/themes/da-one-ocean.yaml";
+    polarity = "dark";
   };
 }

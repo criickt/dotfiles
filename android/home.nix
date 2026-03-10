@@ -11,28 +11,37 @@
 {
   imports = [ ../dev/home.nix ];
 
+  nixpkgs.config = {
+    users.defaultUserShell = pkgs.zsh;
+  };
   targets.genericLinux = {
     enable = true;
     gpu.enable = false;
   };
-
-  home.username = username;
-  home.homeDirectory = homeDirectory;
-
-  nixpkgs.config = {
-    users.defaultUserShell = pkgs.zsh;
+  home = {
+    inherit username homeDirectory;
+    stateVersion = "25.05";
+    sessionVariables = {
+      SSH_ASKPASS = "termux-ssh-askpass";
+      SSH_ASKPASS_REQUIRE = "force";
+      SSH_AUTH_SOCK = "$PREFIX/var/run/ssh-agent.socket";
+    };
+    shellAliases =
+      let
+        shimLib = pkgs.callPackage ./nix-gc-proot.nix { };
+        nixGc = "LD_PRELOAD=${shimLib}/lib/proc-eperm-shim.so nix-collect-garbage";
+      in
+      {
+        nix-collect-garbage = nixGc;
+        hmu = "NIXPKGS_ALLOW_UNFREE=1 home-manager switch --flake \"$HOME/.config/home-manager#${username}@android\" --impure && nix profile wipe-history && home-manager expire-generations '-1 second' && ${nixGc}";
+      };
   };
-  home.stateVersion = "25.05"; # Please read the comment before changing.
 
-  home.sessionVariables = {
-    SSH_ASKPASS = "termux-ssh-askpass";
-    SSH_ASKPASS_REQUIRE = "force";
-    SSH_AUTH_SOCK = "$PREFIX/var/run/ssh-agent.socket";
-  };
   home.packages = with pkgs; [
     fastfetch
     iconv # needed for zsh
   ];
+
   home.file = {
     "termux-ssh-askpass" = {
       source = ./termux-ssh-askpass;
@@ -75,12 +84,9 @@
           localBin = lib.mkOrder 1500 ''export PATH="$HOME/.local/bin:$PATH"'';
         in
         lib.mkMerge [ localBin ];
-      shellAliases = {
-        hmu = "nix flake update --flake ~/.config/home-manager && NIXPKGS_ALLOW_UNFREE=1 home-manager switch --flake ~/.config/home-manager#${username}@android --impure && nix profile wipe-history && home-manager expire-generations '-1 second' && nix-collect-garbage";
-      };
     };
-
   };
+
   gtk.enable = false;
   systemd.user.enable = false;
   qt.enable = false;

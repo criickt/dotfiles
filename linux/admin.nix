@@ -5,22 +5,12 @@
   config,
   lib,
   pkgs,
-  nixgl,
   ...
 }:
 
 {
   imports = [ ../dev/home.nix ];
-  targets.genericLinux = {
-    enable = true;
-    nixGL = {
-      packages = nixgl.packages;
-      defaultWrapper = "mesa";
-      installScripts = [ "mesa" ]; # "nvidiaPrime" ];
-      # vulkan.enable = true; # causes glibcxx ver mismatch
-      # offloadWrapper = "nvidiaPrime";
-    };
-  };
+  targets.genericLinux.enable = true;
 
   home.username = username;
   home.homeDirectory = homeDirectory;
@@ -33,107 +23,40 @@
     allowUnfreePredicate = (pkg: true);
     users.defaultUserShell = pkgs.zsh;
   };
-  nixpkgs.overlays = [ (final: prev: { hyprland = config.lib.nixGL.wrap prev.hyprland; }) ];
+  nixpkgs.overlays = [
+    (final: prev: {
+      consoleet-oldschoolpc = prev.stdenvNoCC.mkDerivation {
+        pname = "consoleet-oldschoolpc";
+        version = "2.2.1";
+        src = prev.fetchurl {
+          url = "https://inai.de/files/consoleet/consoleet-oldschoolpc-2.2.1.tar.zst";
+          hash = "sha256-kYRmOnDnKpP09ipw7TMbxtsz56SZI7NIczDTpGF5/04=";
+        };
+        nativeBuildInputs = [ prev.zstd ];
+        installPhase = ''
+          runHook preInstall
+          mkdir -p $out/share/fonts/opentype
+          cp *.otf $out/share/fonts/opentype/
+          runHook postInstall
+        '';
+      };
+    })
+  ];
   xdg =
     let
-      schemeAppTuples = [
-        # browser & PDF
-        {
-          mime = "text/html";
-          app = "librewolf";
-        }
-        {
-          mime = "x-scheme-handler/http";
-          app = "librewolf";
-        }
-        {
-          mime = "x-scheme-handler/https";
-          app = "librewolf";
-        }
-        {
-          mime = "x-scheme-handler/about";
-          app = "librewolf";
-        }
-        {
-          mime = "x-scheme-handler/unknown";
-          app = "librewolf";
-        }
-        {
-          mime = "application/pdf";
-          app = "librewolf";
-        }
-        {
-          mime = "application/xhtml+xml";
-          app = "librewolf";
-        }
-        {
-          mime = "image/svg+xml";
-          app = "librewolf";
-        }
-        {
-          mime = "image/webp";
-          app = "librewolf";
-        }
-        # video
-        {
-          mime = "video/mp4";
-          app = "mpv";
-        }
-        {
-          mime = "video/webm";
-          app = "mpv";
-        }
-        {
-          mime = "video/mkv";
-          app = "mpv";
-        }
-        {
-          mime = "video/x-matroska";
-          app = "mpv";
-        }
-        {
-          mime = "video/quicktime";
-          app = "mpv";
-        }
-        {
-          mime = "video/x-msvideo";
-          app = "mpv";
-        }
-        {
-          mime = "video/mpeg";
-          app = "mpv";
-        }
-        # audio
-        {
-          mime = "audio/mpeg";
-          app = "mpv";
-        }
-        {
-          mime = "audio/mp4";
-          app = "mpv";
-        }
-        {
-          mime = "audio/flac";
-          app = "mpv";
-        }
-        {
-          mime = "audio/ogg";
-          app = "mpv";
-        }
-        {
-          mime = "audio/x-wav";
-          app = "mpv";
-        }
-        {
-          mime = "audio/x-aiff";
-          app = "mpv";
-        }
+      browserTypes = [
+        "text/html"
+        "text/xml"
+        "application/xhtml+xml"
+        "application/pdf"
+        "image/svg+xml"
+        "image/webp"
+        "x-scheme-handler/http"
+        "x-scheme-handler/https"
+        "x-scheme-handler/about"
+        "x-scheme-handler/unknown"
       ];
-      mimeMap = lib.foldl' (
-        acc: { mime, app }: acc // { "${mime}" = "${app}.desktop"; }
-      ) { } schemeAppTuples;
-      mimesFor =
-        wantedApp: map ({ mime, app }: mime) (lib.filter ({ mime, app }: app == wantedApp) schemeAppTuples);
+      makeDefaults = app: types: lib.genAttrs types (_: "${app}.desktop");
     in
     {
       enable = true;
@@ -144,37 +67,41 @@
         extraPortals = [ pkgs.xdg-desktop-portal-hyprland ];
         configPackages = [ pkgs.hyprland ];
       };
-      desktopEntries = {
-        librewolf = {
-          name = "librewolf";
-          exec = "/usr/bin/librewolf %u";
-          categories = [
-            "Network"
-            "WebBrowser"
-          ];
-          mimeType = mimesFor "librewolf";
-        };
-        mpv = {
-          name = "mpv";
-          exec = "${pkgs.mpv}/bin/mpv %u";
-          categories = [
-            "AudioVideo"
-            "Player"
-          ];
-          mimeType = mimesFor "mpv";
-        };
+      desktopEntries.librewolf = {
+        name = "librewolf";
+        exec = "/usr/bin/librewolf %u";
+        categories = [
+          "Network"
+          "WebBrowser"
+        ];
+        mimeType = browserTypes;
       };
       mimeApps = {
         enable = true;
-        defaultApplications = mimeMap;
+        defaultApplicationPackages = [ pkgs.mpv ];
+        defaultApplications = makeDefaults "librewolf" browserTypes;
       };
     };
   fonts.fontconfig.enable = true;
   home.stateVersion = "25.05"; # Please read the comment before changing.
+  gtk.gtk4.theme = null;
+
+  home.file.".local/bin/zsh-cycle-jobs" = {
+    executable = true;
+    text = ''
+      #!/bin/sh
+      pid=$(cat /tmp/zsh_cycle_pid 2>/dev/null) || exit 0
+      echo $$ >| /tmp/zsh_cycle_token
+      tpgid=$(ps -o tpgid= -p "$pid" 2>/dev/null | tr -d ' ')
+      pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
+      [ -n "$tpgid" ] && [ "$tpgid" != "$pgid" ] && kill -TSTP -"$tpgid" 2>/dev/null
+      sleep 0.05
+      kill -USR1 "$pid" 2>/dev/null
+    '';
+  };
 
   home.packages = with pkgs; [
     brightnessctl
-    dconf # for stylix
     grim
     hyprpicker
     ripdrag
@@ -196,6 +123,7 @@
     netcat
     tesseract
 
+    consoleet-oldschoolpc
     inter
     nerd-fonts.symbols-only
     nerd-fonts.bigblue-terminal
@@ -218,6 +146,7 @@
     in
     {
       enable = true;
+      configType = "hyprlang";
       package = pkgs.hyprland;
       systemd.enableXdgAutostart = true;
       systemd.variables = [ "--all" ];
@@ -237,13 +166,14 @@
         ];
         "$mod" = "SUPER";
         bind = [
-          "$mod, Q, killactive"
-          "$mod, O, exit"
           "$mod, Escape, exec, /usr/bin/hyprlock"
-          "$mod, T, exec, kitty"
+          "$mod, Q, killactive"
+          "$mod, S, exec, kitty"
           "$mod, B, exec, librewolf"
           "$mod, V, exec, kitty --class clipse -e 'clipse'"
-          "$mod, P, exec, hyprpicker -a"
+          "$mod, P, exec, keepassxc"
+          "SUPER_SHIFT, O, exit"
+          "SUPER_SHIFT, P, exec, hyprpicker -a"
           ''SUPER_SHIFT, S, exec, grim -g "$(slurp)" - | wl-copy''
           ''SUPER_SHIFT, C, exec, grim -g "$(slurp)" - | tesseract stdin stdout -l rus+eng | wl-copy''
           ''$mod, R, exec, pkill wl-screenrec || wl-screenrec --audio --audio-device "$(pactl get-default-sink)" -f ~/Documents/screenrecord.mp4''
@@ -253,7 +183,6 @@
           "$mod, H, movefocus, l"
           "$mod, L, movefocus, r"
           "$mod, Tab, changegroupactive, f"
-          "$mod, S, togglesplit"
           "$mod CTRL, H, movewindow, l"
           "$mod CTRL, J, movewindow, d"
           "$mod CTRL, K, movewindow, u"
@@ -300,13 +229,15 @@
           "match:class code, fullscreen_state 0 3"
           "match:class kitty, workspace 1"
           "match:class librewolf, workspace 2"
-          "match:class code, workspace 3"
-          "match:class ableton live 12 suite.exe, workspace 4"
+          "match:class mpv, workspace 3"
+          "match:class mpv, fullscreen on"
+          "match:class code, workspace 4"
+          "match:class ableton live 12 suite.exe, workspace 5"
           "match:class code, group set vscode"
-          "match:class org.keepassxc.KeePassXC, match:title KeePassXC -.*Access Request, float on"
+          "match:class org.keepassxc.KeePassXC, match:title (KeePassXC -.*Access Request|Generate Password), float on"
+          "match:class org.keepassxc.KeePassXC, match:title (KeePassXC -.*Access Request|Generate Password), center on"
           "match:class org.keepassxc.KeePassXC, match:title KeePassXC -.*Access Request, pin on"
           "match:class org.keepassxc.KeePassXC, match:title KeePassXC -.*Access Request, stay_focused on"
-          "match:class org.keepassxc.KeePassXC, match:title KeePassXC -.*Access Request, center on"
         ];
         group.groupbar.enabled = false;
         misc = {
@@ -392,21 +323,6 @@
             RestartSec = 3; # prevents "start request repeated too quickly"
           };
         };
-        ssh-agent-proxy = {
-          Unit = {
-            Description = "SSH Agent proxy for work user";
-            After = [ "ssh-agent.service" ];
-            Requires = [ "ssh-agent.service" ];
-          };
-          Service = {
-            Type = "simple";
-            ExecStartPre = "-${pkgs.coreutils}/bin/rm -f /tmp/work-ssh-agent.sock";
-            ExecStart = "${pkgs.socat}/bin/socat UNIX-LISTEN:/tmp/work-ssh-agent.sock,fork,mode=600 UNIX-CONNECT:%t/ssh-agent";
-            ExecStartPost = "${pkgs.acl}/bin/setfacl -m u:work:rw /tmp/work-ssh-agent.sock";
-            Restart = "on-failure";
-          };
-          Install.WantedBy = [ "default.target" ];
-        };
       };
     };
 
@@ -453,16 +369,61 @@
   };
 
   programs = {
-    home-manager.enable = true;
+    helix.settings.theme = "nyxvamp-obsidian";
     ssh = {
       enable = true;
-      matchBlocks = {
-        "*".extraOptions.SetEnv = "TERM=xterm";
+      settings = {
+        "*".SetEnv = { TERM = "xterm"; };
       };
     };
-    git.enable = true;
-    helix.enable = true;
     zsh = {
+      initContent = ''
+        if [[ -n $KITTY_WINDOW_ID ]]; then
+          _write_cycle_pid() { echo $$ >| /tmp/zsh_cycle_pid }
+          add-zsh-hook precmd _write_cycle_pid
+          _write_cycle_pid
+
+          _CYCLE_TOKEN=
+          _CYCLE_CURRENT=
+
+          TRAPUSR1() {
+            local token=$(</tmp/zsh_cycle_token)
+            [[ $token == $_CYCLE_TOKEN ]] && return
+            _CYCLE_TOKEN=$token
+            _CYCLE_REQUESTED=1
+            zle && zle .send-break
+          }
+
+          _check_cycle_flag() {
+            (( _CYCLE_REQUESTED )) || return
+            _CYCLE_REQUESTED=0
+            local -a jlist
+            jlist=(''${(kon)jobstates})
+            (( ''${#jlist} == 0 )) && return
+            local next current=''${_CYCLE_CURRENT:-} found=0
+            if (( ''${#jlist} == 1 )); then
+              next=''${jlist[1]}
+            else
+              if [[ -z $current ]] || ! (( ''${+jobstates[$current]} )); then
+                for j in $jlist; do
+                  [[ ''${jobstates[$j]} == *:+:* ]] && { current=$j; break }
+                done
+              fi
+              [[ -z $current ]] && return
+              for j in $jlist; do
+                (( found )) && { next=$j; break }
+                [[ $j == $current ]] && found=1
+              done
+              [[ -z $next ]] && next=''${jlist[1]}
+            fi
+            _CYCLE_CURRENT=$next
+            zle -I
+            fg %$next
+          }
+          autoload -Uz add-zle-hook-widget
+          add-zle-hook-widget line-init _check_cycle_flag
+        fi
+      '';
       siteFunctions = {
         dr = ''ripdrag -x -a -W 360 -H 160 "$@"'';
       };
@@ -472,7 +433,7 @@
           cpuMax = "15";
         in
         {
-          hmu = "nix flake update --flake ~/.config/home-manager && NIXPKGS_ALLOW_UNFREE=1 home-manager switch --flake ~/.config/home-manager#${username}@linux --impure";
+          hmu = "nix flake update --flake ~/.config/home-manager && NIXPKGS_ALLOW_UNFREE=1 home-manager switch --flake \"$HOME/.config/home-manager#${username}@linux\" --impure";
           sd = "sudo shutdown now";
           rb = "sudo reboot now";
           cputoggle = ''
@@ -501,8 +462,6 @@
         };
     };
     yazi = {
-      enable = true;
-      enableZshIntegration = true;
       settings = {
         keymap.mgr.prepend_keymap = [
           {
@@ -723,8 +682,13 @@
     };
     kitty = {
       enable = true;
+      package = pkgs.kitty.overrideAttrs (old: {
+        NIX_CFLAGS_COMPILE = (old.NIX_CFLAGS_COMPILE or "") + " -march=native -mtune=native";
+      });
       shellIntegration.enableZshIntegration = true;
       settings = {
+        font_family = lib.mkForce "Consoleet EGA 8x14 Smooth";
+        font_size = lib.mkForce 14;
         tab_bar_edge = "top";
         confirm_os_window_close = 0;
         enable_audio_bell = 0;
@@ -732,9 +696,13 @@
         tab_separator = " | ";
         tab_title_max_length = 23;
         input_delay = 0;
-        cursor_trail = 1;
-        cursor_trail_decay = "0.07 0.15";
+        repaint_delay = 2;
         sync_to_monitor = false;
+        wayland_enable_ime = false;
+        cursor_trail = 0;
+        cursor_trail_decay = "0.07 0.15";
+        wheel_scroll_multiplier = 5;
+        touch_scroll_multiplier = 5;
       };
       keybindings =
         let
@@ -748,11 +716,12 @@
         {
           "alt+t" = "new_tab";
           "alt+q" = "close_tab";
+          "alt+grave" = "launch --type=background ${homeDirectory}/.local/bin/zsh-cycle-jobs";
         }
         // tabs;
     };
     vscode = {
-      enable = true;
+      enable = false;
       profiles.default.userSettings = {
         "editor.fontLigatures" = "'calt' 0, 'HSKL' 1";
         "telemetry.telemetryLevel" = "off";
@@ -766,7 +735,6 @@
         "workbench.layoutControl.enabled" = false;
         "workbench.colorTheme" = lib.mkForce "Omni";
         "terminal.integrated.fontSize" = lib.mkForce 15;
-
         "containers.containerClient" = "com.microsoft.visualstudio.containers.podman";
         "dev.containers.dockerPath" = "podman";
         "files.trimFinalNewlines" = true;
@@ -787,9 +755,12 @@
         sub = "yes";
         sub-delay = 1.9;
         sub-font = lib.mkForce "Inter Display";
-        sub-font-size = 30; # 20
-        sub-color = "#FFFFFFFF"; # #66FFFFFF
-        sub-back-color = "#FF000000"; # #66000000
+        sub-font-size = 20;
+        sub-color = "#66FFFFFF";
+        sub-back-color = "#66000000";
+        # sub-font-size = 30;
+        # sub-color = "#FFFFFFFF";
+        # sub-back-color = "#FF000000";
         sub-border-style = "background-box";
         sub-border-size = 0;
         sub-pos = 5;
@@ -836,6 +807,7 @@
 
   stylix = {
     enable = true;
+    targets.kde.enable = false;
     image = pkgs.fetchurl {
       url = "https://images.unsplash.com/photo-1765707886539-6d57024ddc2f";
       hash = "sha256-5B+znuF1860cuLMn5eyob7ZGaSmlgTNATgb3A6xD87U=";
