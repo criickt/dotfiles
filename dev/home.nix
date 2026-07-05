@@ -510,8 +510,8 @@ in
           "directory"
           "spectrum"
           "utility"
-          "completion"
           "history-substring-search"
+          "completion"
         ];
       };
     };
