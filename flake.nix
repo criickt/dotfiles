@@ -1,6 +1,11 @@
 {
   inputs = {
-    nixpkgs.url = "nixpkgs/98a8e5122ef525c9651afe7fdbe9c313b3ccc026";
+    nixpkgs.url = "nixpkgs/5ba6c30e86e94939e5f8e2a551958d4fde7cf425";
+    nix-darwin = {
+      url = "github:nix-darwin/nix-darwin/master";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    nix-homebrew.url = "github:zhaofengli/nix-homebrew";
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -25,8 +30,14 @@
       linuxUser = "admin";
       workUser = "work";
       androidUser = "u0_a305";
+      darwinUser = "admin";
     in
     {
+      darwinConfigurations."mac" = import ./darwin {
+        inherit inputs;
+        username = darwinUser;
+      };
+
       homeConfigurations = {
         "${androidUser}@android" = import ./android {
           inherit inputs;

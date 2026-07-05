@@ -20,8 +20,10 @@ let
     esac
     exec "$GIT" "$@"
   '';
+  isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
   isTermux =
-    pkgs.stdenv.hostPlatform.isAarch64
+    !isDarwin
+    && pkgs.stdenv.hostPlatform.isAarch64
     && !config.systemd.user.enable
     && !config.targets.genericLinux.gpu.enable;
   claudeStatusLine = pkgs.writeShellScript "claude-statusline" ''
@@ -115,26 +117,27 @@ let
     echo "$result"
   '';
   weaveVersion = "0.2.3";
+  weaveTargets = {
+    x86_64-linux = "x86_64-unknown-linux-gnu";
+    aarch64-linux = "aarch64-unknown-linux-gnu";
+    x86_64-darwin = "x86_64-apple-darwin";
+    aarch64-darwin = "aarch64-apple-darwin";
+  };
   weavePkg =
     binary: hashes:
+    let
+      system = pkgs.stdenv.hostPlatform.system;
+    in
     pkgs.stdenv.mkDerivation {
       pname = "weave-${binary}";
       version = weaveVersion;
-      src =
-        {
-          x86_64-linux = pkgs.fetchurl {
-            url = "https://github.com/Ataraxy-Labs/weave/releases/download/v${weaveVersion}/weave-${binary}-x86_64-unknown-linux-gnu.tar.gz";
-            hash = hashes.x86_64;
-          };
-          aarch64-linux = pkgs.fetchurl {
-            url = "https://github.com/Ataraxy-Labs/weave/releases/download/v${weaveVersion}/weave-${binary}-aarch64-unknown-linux-gnu.tar.gz";
-            hash = hashes.aarch64;
-          };
-        }
-        .${pkgs.stdenv.hostPlatform.system};
+      src = pkgs.fetchurl {
+        url = "https://github.com/Ataraxy-Labs/weave/releases/download/v${weaveVersion}/weave-${binary}-${weaveTargets.${system}}.tar.gz";
+        hash = hashes.${system};
+      };
       sourceRoot = ".";
-      nativeBuildInputs = [ pkgs.autoPatchelfHook ];
-      buildInputs = [ pkgs.stdenv.cc.cc.lib ];
+      nativeBuildInputs = lib.optionals pkgs.stdenv.isLinux [ pkgs.autoPatchelfHook ];
+      buildInputs = lib.optionals pkgs.stdenv.isLinux [ pkgs.stdenv.cc.cc.lib ];
       installPhase =
         let
           binaryName = if binary == "cli" then "weave" else "weave-${binary}";
@@ -144,12 +147,16 @@ let
         '';
     };
   weave = weavePkg "cli" {
-    x86_64 = "sha256-xXyRPqxnCJULFQ2miy9+GX8ZzS5f+62Pv5q2eHKd0Gw=";
-    aarch64 = "sha256-D2lUqRHoA63RJ57NUh4jzElTs4GUk0OH0r9YZvyKGh8=";
+    x86_64-linux = "sha256-xXyRPqxnCJULFQ2miy9+GX8ZzS5f+62Pv5q2eHKd0Gw=";
+    aarch64-linux = "sha256-D2lUqRHoA63RJ57NUh4jzElTs4GUk0OH0r9YZvyKGh8=";
+    x86_64-darwin = "sha256-6sOhKj/YNsT4v3y2iy53oKh7X/J4PfD/TwNvsrJEm2Y=";
+    aarch64-darwin = "sha256-ueMlAWbeJs80qjkwQUfTAlv/BCGzmRwt8c6zG+wZ8+s=";
   };
   weaveDriver = weavePkg "driver" {
-    x86_64 = "sha256-5LyDQrxAuW1S3qzeEnODNP7TPhc+KzsjW8j84yobhoE=";
-    aarch64 = "sha256-HjkAcIJ9/4ulSJsRAhj23FSb2+1viIPV+4/JFTtVNiA=";
+    x86_64-linux = "sha256-5LyDQrxAuW1S3qzeEnODNP7TPhc+KzsjW8j84yobhoE=";
+    aarch64-linux = "sha256-HjkAcIJ9/4ulSJsRAhj23FSb2+1viIPV+4/JFTtVNiA=";
+    x86_64-darwin = "sha256-q2qLngKmWvoPwkVafQ8os+sxz2jmeU5mt0E48R0vUao=";
+    aarch64-darwin = "sha256-Hzcy0b99PLWkNt3W6g71QxGtQx9v8DDHjLdCp5EmugM=";
   };
 in
 {
@@ -168,7 +175,7 @@ in
       });
     })
   ];
-  nix = {
+  nix = lib.mkIf (!isDarwin) {
     package = pkgs.nix;
     settings.experimental-features = [
       "nix-command"
@@ -183,6 +190,7 @@ in
       GRADLE_USER_HOME = "$HOME/.cache";
       BUILDAH_FORMAT = "docker";
       DOCKER_CONFIG = "$HOME/.config/docker";
+      CURL_HOME = "$HOME/.config/curl";
       # Source HM session vars for non-interactive bash scripts (#!/bin/bash)
       BASH_ENV = "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh";
     };
@@ -191,6 +199,8 @@ in
       dinit = ''devenv init && printf '%s\n' '#!/usr/bin/env bash' 'export DIRENV_WARN_TIMEOUT=20s' 'eval "$(devenv direnvrc)"' 'use devenv' > .envrc && direnv allow'';
     };
   };
+
+  xdg.configFile."curl/.curlrc".text = "proto-default = https\n";
 
   home.packages =
     with pkgs;
@@ -201,23 +211,26 @@ in
       fd
       fzf
       gibo
+      git-xet
       jaq
       (pkgs.writeShellScriptBin "jq" ''exec jaq "$@"'')
       pv
       ripgrep
       tlrc
       tree
-      waypipe
       weave
       witr
     ]
-    ++ lib.optionals (!isTermux) [ podman-compose ];
+    ++ lib.optionals (!isDarwin) [ waypipe ]
+    ++ lib.optionals (!isTermux && !isDarwin) [ podman-compose ];
 
-  services.podman = lib.mkIf (!isTermux) {
-    enable = true;
-    settings.storage = {
-      storage.options.overlay = {
-        ignore_chown_errors = "true";
+  services = lib.mkIf (!isDarwin) {
+    podman = lib.mkIf (!isTermux) {
+      enable = true;
+      settings.storage = {
+        storage.options.overlay = {
+          ignore_chown_errors = "true";
+        };
       };
     };
   };
@@ -309,6 +322,11 @@ in
           writeCommitGraph = true;
         };
         transfer.fsckObjects = true;
+        lfs."customtransfer.xet" = {
+          path = "git-xet";
+          args = "transfer";
+          concurrent = true;
+        };
         help.autocorrect = "prompt";
         commit.verbose = true;
         rerere = {
@@ -491,8 +509,8 @@ in
         ];
       siteFunctions = {
         gclone = ''gitstrip="''${1#*:}"; gitpath="''${gitstrip%.git}"; git clone "$1" "''${gitpath%.git}"'';
-        mkcd = ''mkdir --parents "$1" && cd "$1"'';
-        tch = ''mkdir --parents "$(dirname "$@")" && touch "$@"'';
+        mkcd = ''mkdir -p "$1" && cd "$1"'';
+        tch = ''mkdir -p "$(dirname "$@")" && touch "$@"'';
         git = ''${gitHooksWrapper} "$(whence -p git)" "$@"'';
       };
       prezto = {

@@ -5,11 +5,12 @@
   config,
   lib,
   pkgs,
+  mpvSettings,
   ...
 }:
 
 {
-  imports = [ ../dev/home.nix ];
+  imports = [ ../dev/home.nix ../dev/gui.nix ];
   targets.genericLinux.enable = true;
 
   home.username = username;
@@ -23,25 +24,6 @@
     allowUnfreePredicate = (pkg: true);
     users.defaultUserShell = pkgs.zsh;
   };
-  nixpkgs.overlays = [
-    (final: prev: {
-      consoleet-oldschoolpc = prev.stdenvNoCC.mkDerivation {
-        pname = "consoleet-oldschoolpc";
-        version = "2.2.1";
-        src = prev.fetchurl {
-          url = "https://inai.de/files/consoleet/consoleet-oldschoolpc-2.2.1.tar.zst";
-          hash = "sha256-kYRmOnDnKpP09ipw7TMbxtsz56SZI7NIczDTpGF5/04=";
-        };
-        nativeBuildInputs = [ prev.zstd ];
-        installPhase = ''
-          runHook preInstall
-          mkdir -p $out/share/fonts/opentype
-          cp *.otf $out/share/fonts/opentype/
-          runHook postInstall
-        '';
-      };
-    })
-  ];
   xdg =
     let
       browserTypes = [
@@ -82,9 +64,9 @@
         defaultApplications = makeDefaults "librewolf" browserTypes;
       };
     };
-  fonts.fontconfig.enable = true;
   home.stateVersion = "25.05"; # Please read the comment before changing.
   gtk.gtk4.theme = null;
+  fonts.fontconfig.enable = true;
 
   home.file.".local/bin/zsh-cycle-jobs" = {
     executable = true;
@@ -123,7 +105,6 @@
     netcat
     tesseract
 
-    consoleet-oldschoolpc
     inter
     nerd-fonts.symbols-only
     nerd-fonts.bigblue-terminal
@@ -370,6 +351,14 @@
 
   programs = {
     helix.settings.theme = "nyxvamp-obsidian";
+    mpv = {
+      enable = true;
+      scripts = [ pkgs.mpvScripts.webtorrent-mpv-hook ];
+      config = mpvSettings // {
+        sub-font = lib.mkForce "Inter Display";
+        sub-font-size = 20;
+      };
+    };
     ssh = {
       enable = true;
       settings = {
@@ -680,46 +669,7 @@
         }
       '';
     };
-    kitty = {
-      enable = true;
-      package = pkgs.kitty.overrideAttrs (old: {
-        NIX_CFLAGS_COMPILE = (old.NIX_CFLAGS_COMPILE or "") + " -march=native -mtune=native";
-      });
-      shellIntegration.enableZshIntegration = true;
-      settings = {
-        font_family = lib.mkForce "Consoleet EGA 8x14 Smooth";
-        font_size = lib.mkForce 14;
-        tab_bar_edge = "top";
-        confirm_os_window_close = 0;
-        enable_audio_bell = 0;
-        tab_bar_style = "separator";
-        tab_separator = " | ";
-        tab_title_max_length = 23;
-        input_delay = 0;
-        repaint_delay = 2;
-        sync_to_monitor = false;
-        wayland_enable_ime = false;
-        cursor_trail = 0;
-        cursor_trail_decay = "0.07 0.15";
-        wheel_scroll_multiplier = 5;
-        touch_scroll_multiplier = 5;
-      };
-      keybindings =
-        let
-          tabs = builtins.listToAttrs (
-            map (i: {
-              name = "alt+${toString i}";
-              value = "goto_tab ${toString i}";
-            }) (lib.lists.range 1 9)
-          );
-        in
-        {
-          "alt+t" = "new_tab";
-          "alt+q" = "close_tab";
-          "alt+grave" = "launch --type=background ${homeDirectory}/.local/bin/zsh-cycle-jobs";
-        }
-        // tabs;
-    };
+    kitty.keybindings."alt+grave" = "launch --type=background ${homeDirectory}/.local/bin/zsh-cycle-jobs";
     vscode = {
       enable = false;
       profiles.default.userSettings = {
@@ -743,28 +693,6 @@
           GIT_EDITOR = "code\\ --wait";
         };
         "terminal.integrated.commandsToSkipShell" = [ "workbench.action.toggleSidebarVisibility" ];
-      };
-    };
-    mpv = {
-      enable = true;
-      scripts = [ pkgs.mpvScripts.webtorrent-mpv-hook ];
-      config = {
-        alang = [ "en" ];
-        slang = [ "en" ];
-        embeddedfonts = "no";
-        sub = "yes";
-        sub-delay = 1.9;
-        sub-font = lib.mkForce "Inter Display";
-        sub-font-size = 20;
-        sub-color = "#66FFFFFF";
-        sub-back-color = "#66000000";
-        # sub-font-size = 30;
-        # sub-color = "#FFFFFFFF";
-        # sub-back-color = "#FF000000";
-        sub-border-style = "background-box";
-        sub-border-size = 0;
-        sub-pos = 5;
-        sub-ass-override = "strip";
       };
     };
     keepassxc = {
