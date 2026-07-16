@@ -19,6 +19,17 @@ let
       done
     '';
 
+  kbdBacklightToggle = writeShellScript "kbd-backlight-toggle" ''
+    exec /usr/bin/osascript -l JavaScript -e '
+      ObjC.import("Foundation");
+      $.NSBundle.bundleWithPath("/System/Library/PrivateFrameworks/CoreBrightness.framework").load;
+      const c = $.NSClassFromString("KeyboardBrightnessClient").alloc.init;
+      const cur = c.brightnessForKeyboard(1);
+      c.enableAutoBrightnessForKeyboard(false, 1);
+      c.setBrightnessForKeyboard(cur > 0.01 ? 0 : 0.5, 1);
+    '
+  '';
+
   toMpvConf =
     attrs:
     lib.concatStringsSep "\n" (
@@ -125,6 +136,7 @@ in
     casks = [
       "keepassxc"
       "librewolf"
+      "markedit"
     ];
   };
 
@@ -133,6 +145,7 @@ in
     skhdConfig = ''
       rcmd - b : ${appFullscreen "LibreWolf"}
       rcmd - l : ${appFullscreen "kitty"}
+      rcmd - 0x2C : ${kbdBacklightToggle}
     '';
   };
 
@@ -151,6 +164,7 @@ in
         ApplePressAndHoldEnabled = false;
         NSAutomaticDashSubstitutionEnabled = false;
         NSAutomaticQuoteSubstitutionEnabled = false;
+        "com.apple.keyboard.fnState" = false;
       };
       universalaccess = {
         reduceTransparency = true;
@@ -181,6 +195,9 @@ in
         GuestEnabled = false;
       };
       CustomUserPreferences = {
+        "NSGlobalDomain" = {
+          NSQuitAlwaysKeepsWindows = true;
+        };
         "com.apple.finder" = {
           ShowSidebar = true;
         };
@@ -237,6 +254,43 @@ in
             echo "Working tree clean - skipping empty amend."
           fi
         '';
+        # APFS clonefile mirror of Claude Code sessions: cp -c writes no data
+        # blocks, unchanged files are skipped via size+mtime, nothing is ever
+        # deleted or shrunk. Needs BSD stat/cp, hence the system PATH.
+        ccsessionsBackup = pkgs.writeShellScript "ccsessions-backup" ''
+          set -euo pipefail
+          export PATH=/usr/bin:/bin
+          SRC="${config.home.homeDirectory}/.claude/projects"
+          DST="${config.home.homeDirectory}/Code/ccsessions"
+          [ -d "$SRC" ] || exit 0
+          mkdir -p "$DST"
+          copied=0 skipped=0 preserved=0
+          cd "$SRC"
+          while IFS= read -r -d "" rel; do
+            rel="''${rel#./}"
+            # project dirs start with a dash (-Users-...), so always pass
+            # absolute paths to cp/stat or they get parsed as options
+            src="$SRC/$rel"
+            dst="$DST/$rel"
+            if [ -e "$dst" ]; then
+              s_stat=$(stat -f "%z %m" "$src")
+              d_stat=$(stat -f "%z %m" "$dst")
+              if [ "$s_stat" = "$d_stat" ]; then
+                skipped=$((skipped + 1))
+                continue
+              fi
+              if [ "''${s_stat%% *}" -lt "''${d_stat%% *}" ]; then
+                mv "$dst" "$dst.$(date +%Y%m%dT%H%M%S).trunc"
+                preserved=$((preserved + 1))
+              fi
+            fi
+            mkdir -p "$(dirname "$dst")"
+            cp -c -p "$src" "$dst.tmp.$$"
+            mv -f "$dst.tmp.$$" "$dst"
+            copied=$((copied + 1))
+          done < <(find . -type f -name "*.jsonl" -print0)
+          echo "$(date "+%F %T") copied=$copied skipped=$skipped preserved=$preserved"
+        '';
       in
       {
         imports = [
@@ -253,20 +307,21 @@ in
         home.shellAliases.hmu = "nix flake update --flake ~/.config/home-manager && sudo darwin-rebuild switch --impure --flake \"$HOME/.config/home-manager#mac\"";
         home.file.".hushlogin".text = "";
         home.packages = with pkgs; [
-          # apple/container: Nix profiles don't link /libexec, so pin
-          # CONTAINER_INSTALL_ROOT to $out or the apiserver can't find its plugins.
-          (container.overrideAttrs (old: {
-            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ makeWrapper ];
-            postFixup = (old.postFixup or "") + ''
+          # apple/container: Nix profiles don't link /libexec, so the apiserver
+          # can't find its plugins unless CONTAINER_INSTALL_ROOT points at the package root
+          (symlinkJoin {
+            name = "container-wrapped";
+            paths = [ container ];
+            nativeBuildInputs = [ makeWrapper ];
+            postBuild = ''
               for b in container container-apiserver; do
-                wrapProgram "$out/bin/$b" --set CONTAINER_INSTALL_ROOT "$out"
+                wrapProgram "$out/bin/$b" --set CONTAINER_INSTALL_ROOT "${container}"
               done
             '';
-          }))
+          })
           htop
           iina
           qbittorrent-enhanced
-          rapidraw
           xz
         ];
 
@@ -285,6 +340,31 @@ in
               pkgs.writeText "kitty-fullscreen.session" "os_window_state fullscreen\n"
             );
             macos_option_as_alt = "yes";
+            confirm_os_window_close = 2;
+          };
+          yazi.settings.opener = {
+            reveal = [
+              {
+                run = "open -R %s1";
+                desc = "Reveal";
+              }
+              {
+                run = "clear; mdls %s1; echo 'Press enter to exit'; read _";
+                block = true;
+                desc = "Show metadata";
+              }
+            ];
+            play = [
+              {
+                run = "open %s";
+                desc = "Play";
+              }
+              {
+                run = "clear; afinfo %s1 2>/dev/null || mdls %s1; echo 'Press enter to exit'; read _";
+                block = true;
+                desc = "Show media info";
+              }
+            ];
           };
         };
 
@@ -295,8 +375,23 @@ in
             WatchPaths = [ kdbxDir ];
             WorkingDirectory = kdbxDir;
             EnvironmentVariables.GIT_SSH_COMMAND = "ssh -i ${config.home.homeDirectory}/.ssh/backup.pub";
-            StandardOutPath = "/tmp/keepassxc-sync.log";
-            StandardErrorPath = "/tmp/keepassxc-sync.log";
+            StandardOutPath = "${config.home.homeDirectory}/Library/Logs/keepassxc-sync.log";
+            StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/keepassxc-sync.log";
+          };
+        };
+
+        launchd.agents.ccsessions-backup = {
+          enable = true;
+          config = {
+            ProgramArguments = [ "${ccsessionsBackup}" ];
+            # WatchPaths is non-recursive: it only fires when a project dir is
+            # added/removed; StartInterval is what catches in-place appends.
+            WatchPaths = [ "${config.home.homeDirectory}/.claude/projects" ];
+            StartInterval = 14400;
+            ThrottleInterval = 14400;
+            RunAtLoad = true;
+            StandardOutPath = "${config.home.homeDirectory}/Library/Logs/ccsessions-backup.log";
+            StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/ccsessions-backup.log";
           };
         };
 

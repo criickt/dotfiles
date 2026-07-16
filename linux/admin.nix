@@ -65,7 +65,6 @@
       };
     };
   home.stateVersion = "25.05"; # Please read the comment before changing.
-  gtk.gtk4.theme = null;
   fonts.fontconfig.enable = true;
 
   home.file.".local/bin/zsh-cycle-jobs" = {
@@ -97,7 +96,6 @@
     binsider
     bluetui
     exiv2
-    fastfetch
     go-chromecast
     htop
     libarchive

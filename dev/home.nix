@@ -136,8 +136,8 @@ let
         hash = hashes.${system};
       };
       sourceRoot = ".";
-      nativeBuildInputs = lib.optionals pkgs.stdenv.isLinux [ pkgs.autoPatchelfHook ];
-      buildInputs = lib.optionals pkgs.stdenv.isLinux [ pkgs.stdenv.cc.cc.lib ];
+      nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.autoPatchelfHook ];
+      buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.stdenv.cc.cc.lib ];
       installPhase =
         let
           binaryName = if binary == "cli" then "weave" else "weave-${binary}";
@@ -209,7 +209,7 @@ in
       devenv
       ec
       fd
-      fzf
+      ffmpeg-headless
       gibo
       git-xet
       jaq
@@ -221,7 +221,6 @@ in
       weave
       witr
     ]
-    ++ lib.optionals (!isDarwin) [ waypipe ]
     ++ lib.optionals (!isTermux && !isDarwin) [ podman-compose ];
 
   services = lib.mkIf (!isDarwin) {
@@ -273,6 +272,11 @@ in
         side-by-side = !isTermux;
         hyperlinks = true;
       };
+    };
+    fzf = {
+      enable = true;
+      # keep the patched eval in zshConfig instead
+      enableZshIntegration = false;
     };
     git = {
       enable = true;
@@ -375,12 +379,17 @@ in
       settings = {
         editor = {
           auto-format = true;
+          auto-save = {
+            after-delay.enable = true;
+            after-delay.timeout = 60000;
+          };
           bufferline = "multiple";
           cursor-shape = {
             insert = "bar";
             normal = "block";
             select = "underline";
           };
+          soft-wrap.enable = true;
           trim-trailing-whitespace = true;
           trim-final-newlines = true;
         };
@@ -425,6 +434,16 @@ in
         mgr = {
           show_hidden = true;
         };
+        open.prepend_rules = [
+          {
+            mime = "text/*";
+            use = [
+              "edit"
+              "open"
+              "reveal"
+            ];
+          }
+        ];
       };
       initLua = ''
         Status:children_add(function()
@@ -485,7 +504,7 @@ in
               }
             ''}
             PROMPT='> '
-            RPROMPT='${if isTermux then "$(_prompt_pwd)" else "%~"}$(git_prompt_info)'
+            RPROMPT='${if isTermux then "$(_prompt_pwd)" else "%~"}$(git_prompt_info) %F{8}%?%f'
           '';
           ctrlzToggle = lib.mkOrder 1400 ''
             function fancy-ctrl-z() {
@@ -500,7 +519,20 @@ in
             zle -N fancy-ctrl-z
             bindkey '^Z' fancy-ctrl-z
           '';
-          zshConfig = lib.mkOrder 1500 ''eval "$(fzf --zsh| sed -e '/zmodload/s/perl/perl_off/' -e '/selected/s/fc -rl/fc -rlt "%y-%m-%d"/')"'';
+          zshConfig = lib.mkOrder 1500 ''
+            export FZF_CTRL_R_OPTS="--with-nth 2.. --nth ..-3"
+            __fzf_hist_fmt() {
+              awk -v w=$((COLUMNS-3)) '{
+                if (match($0, /^[ \t]*[0-9]+\**[ \t]+[^ \t]+[ \t]+/) == 0) { print; next }
+                n=$1; d=$2
+                cmd=substr($0, RLENGTH+1)
+                pad=w-length(cmd)-length(d)-length(n)-2
+                if (pad<2) pad=2
+                printf "%s  %s%"pad"s%s  %s\n", n, cmd, "", d, n
+              }'
+            }
+            eval "$(fzf --zsh| sed -e '/zmodload/s/perl/perl_off/' -e '/selected/s/fc -rl/fc -rlt "%y-%m-%d"/' -e '/scheme=history/s/FZF_DEFAULT_OPTS/__fzf_hist_fmt | FZF_DEFAULT_OPTS/')"
+          '';
         in
         lib.mkMerge [
           kardanTheme
@@ -555,6 +587,8 @@ in
             "WebSearch"
             "WebFetch"
           ];
+          cleanupPeriodDays = 365;
+          autoCompactEnabled = false;
         }
       );
       target = "${homeDirectory}/.claude/settings.json";

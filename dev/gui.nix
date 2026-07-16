@@ -9,11 +9,11 @@ let
   closeBind = if isDarwin then "cmd+w" else "alt+q";
 
   consoleet = pkgs.stdenvNoCC.mkDerivation {
-    pname = "consoleet-oldschoolpc";
-    version = "2.2.1";
+    pname = "consoleet-darwin";
+    version = "20211008";
     src = pkgs.fetchurl {
-      url = "https://inai.de/files/consoleet/consoleet-oldschoolpc-2.2.1.tar.zst";
-      hash = "sha256-kYRmOnDnKpP09ipw7TMbxtsz56SZI7NIczDTpGF5/04=";
+      url = "https://inai.de/files/consoleet/consoleet-darwin-20211008.tar.zst";
+      hash = "sha256-OStyp7CfiXnxdhn4rYDQnySy+o1lLCRTm+ExTaJ+lz0=";
     };
     nativeBuildInputs = [ pkgs.zstd ];
     installPhase = ''
@@ -52,10 +52,9 @@ in
       });
       shellIntegration.enableZshIntegration = true;
       settings = {
-        font_family = lib.mkForce "Consoleet EGA 8x14 Smooth";
-        font_size = lib.mkForce (if isDarwin then 18.5 else 14);
+        font_family = lib.mkForce "Consoleet Darwin Smooth";
+        font_size = lib.mkForce (if isDarwin then 20 else 14);
         tab_bar_edge = "top";
-        confirm_os_window_close = 0;
         enable_audio_bell = 0;
         tab_bar_style = "separator";
         tab_separator = " | ";
@@ -81,10 +80,14 @@ in
         {
           "${mod}+t" = "new_tab";
           "${closeBind}" = "close_tab";
-          "${mod}+left" = "previous_tab";
-          "${mod}+right" = "next_tab";
           "${mod}+," = "move_tab_backward";
           "${mod}+." = "move_tab_forward";
+          "ctrl+tab" = "next_tab";
+          "ctrl+shift+tab" = "previous_tab";
+        }
+        // lib.optionalAttrs isDarwin {
+          "cmd+opt+left" = "previous_tab";
+          "cmd+opt+right" = "next_tab";
         }
         // tabs;
     };

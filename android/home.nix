@@ -34,11 +34,11 @@
       {
         nix-collect-garbage = nixGc;
         hmu = "NIXPKGS_ALLOW_UNFREE=1 home-manager switch --flake \"$HOME/.config/home-manager#${username}@android\" --impure && nix profile wipe-history && home-manager expire-generations '-1 second' && ${nixGc}";
+        sshpw = "SSH_ASKPASS_REQUIRE=never ssh -o PubkeyAuthentication=no -o PreferredAuthentications=keyboard-interactive,password";
       };
   };
 
   home.packages = with pkgs; [
-    fastfetch
     iconv # needed for zsh
   ];
 
