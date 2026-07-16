@@ -29,7 +29,6 @@
   };
 
   home.packages = with pkgs; [
-    fastfetch
   ];
 
   systemd.user = {

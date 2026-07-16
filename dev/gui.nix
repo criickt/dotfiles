@@ -9,17 +9,34 @@ let
   closeBind = if isDarwin then "cmd+w" else "alt+q";
 
   consoleet = pkgs.stdenvNoCC.mkDerivation {
-    pname = "consoleet-oldschoolpc";
-    version = "2.2.1";
+    pname = "consoleet-darwin";
+    version = "20211008";
     src = pkgs.fetchurl {
-      url = "https://inai.de/files/consoleet/consoleet-oldschoolpc-2.2.1.tar.zst";
-      hash = "sha256-kYRmOnDnKpP09ipw7TMbxtsz56SZI7NIczDTpGF5/04=";
+      url = "https://inai.de/files/consoleet/consoleet-darwin-20211008.tar.zst";
+      hash = "sha256-OStyp7CfiXnxdhn4rYDQnySy+o1lLCRTm+ExTaJ+lz0=";
     };
     nativeBuildInputs = [ pkgs.zstd ];
     installPhase = ''
       runHook preInstall
       mkdir -p $out/share/fonts/opentype
       cp *.otf $out/share/fonts/opentype/
+      runHook postInstall
+    '';
+  };
+
+  # Darwin covers only CP437, no Cyrillic; Terminus-16 Smooth fills it via symbol_map
+  consoleet-terminus = pkgs.stdenvNoCC.mkDerivation {
+    pname = "consoleet-terminus";
+    version = "4.49.1";
+    src = pkgs.fetchurl {
+      url = "https://inai.de/files/consoleet/consoleet-terminus-4.49.1.tar.zst";
+      hash = "sha256-IH+1gnJYRCm5uD3NIXBslFIs+vg2dq2uUjZkqWpp8SE=";
+    };
+    nativeBuildInputs = [ pkgs.zstd ];
+    installPhase = ''
+      runHook preInstall
+      mkdir -p $out/share/fonts/opentype
+      cp consoleet_ter16bv.otf $out/share/fonts/opentype/
       runHook postInstall
     '';
   };
@@ -40,7 +57,10 @@ let
 in
 {
   _module.args.mpvSettings = mpvSettings;
-  home.packages = [ consoleet ];
+  home.packages = [
+    consoleet
+    consoleet-terminus
+  ];
 
   programs = {
     kitty = {
@@ -52,10 +72,10 @@ in
       });
       shellIntegration.enableZshIntegration = true;
       settings = {
-        font_family = lib.mkForce "Consoleet EGA 8x14 Smooth";
-        font_size = lib.mkForce (if isDarwin then 18.5 else 14);
+        font_family = lib.mkForce "Consoleet Darwin Smooth";
+        font_size = lib.mkForce (if isDarwin then 20 else 14);
+        symbol_map = "U+0400-U+052F,U+2DE0-U+2DFF,U+A640-U+A69F Consoleet Terminus-16 Smooth";
         tab_bar_edge = "top";
-        confirm_os_window_close = 0;
         enable_audio_bell = 0;
         tab_bar_style = "separator";
         tab_separator = " | ";
@@ -81,10 +101,14 @@ in
         {
           "${mod}+t" = "new_tab";
           "${closeBind}" = "close_tab";
-          "${mod}+left" = "previous_tab";
-          "${mod}+right" = "next_tab";
           "${mod}+," = "move_tab_backward";
           "${mod}+." = "move_tab_forward";
+          "ctrl+tab" = "next_tab";
+          "ctrl+shift+tab" = "previous_tab";
+        }
+        // lib.optionalAttrs isDarwin {
+          "cmd+opt+left" = "previous_tab";
+          "cmd+opt+right" = "next_tab";
         }
         // tabs;
     };

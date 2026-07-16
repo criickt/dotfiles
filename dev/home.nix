@@ -116,7 +116,7 @@ let
     done
     echo "$result"
   '';
-  weaveVersion = "0.2.3";
+  weaveVersion = "0.5.4";
   weaveTargets = {
     x86_64-linux = "x86_64-unknown-linux-gnu";
     aarch64-linux = "aarch64-unknown-linux-gnu";
@@ -136,27 +136,34 @@ let
         hash = hashes.${system};
       };
       sourceRoot = ".";
-      nativeBuildInputs = lib.optionals pkgs.stdenv.isLinux [ pkgs.autoPatchelfHook ];
-      buildInputs = lib.optionals pkgs.stdenv.isLinux [ pkgs.stdenv.cc.cc.lib ];
+      nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.autoPatchelfHook ];
+      buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.stdenv.cc.cc.lib ];
       installPhase =
         let
           binaryName = if binary == "cli" then "weave" else "weave-${binary}";
         in
         ''
           install -Dm755 ${binaryName} $out/bin/${binaryName}
+        ''
+        + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+          for lib in libssl.3.dylib libcrypto.3.dylib; do
+            for prefix in /opt/homebrew /usr/local; do
+              install_name_tool -change "$prefix/opt/openssl@3/lib/$lib" "${pkgs.openssl.out}/lib/$lib" $out/bin/${binaryName}
+            done
+          done
         '';
     };
   weave = weavePkg "cli" {
-    x86_64-linux = "sha256-xXyRPqxnCJULFQ2miy9+GX8ZzS5f+62Pv5q2eHKd0Gw=";
-    aarch64-linux = "sha256-D2lUqRHoA63RJ57NUh4jzElTs4GUk0OH0r9YZvyKGh8=";
-    x86_64-darwin = "sha256-6sOhKj/YNsT4v3y2iy53oKh7X/J4PfD/TwNvsrJEm2Y=";
-    aarch64-darwin = "sha256-ueMlAWbeJs80qjkwQUfTAlv/BCGzmRwt8c6zG+wZ8+s=";
+    x86_64-linux = "sha256-k7n6A+cUr4CR9MKKhse6gNmAPVoH0ZbEYBlgrVFCbfw=";
+    aarch64-linux = "sha256-6MwhreAcj5tmWzx/NEZ4Zr5yMgy8VKchZlV+5QJEDnE=";
+    x86_64-darwin = "sha256-YCXqjhmw0ldYN+Hu8uskKoZCX0QUyBpllvlH7EbI0IA=";
+    aarch64-darwin = "sha256-bogOt6A4+9I8Lo33vU3tF+6cBPvx7fyLbQM2RHmwnYc=";
   };
   weaveDriver = weavePkg "driver" {
-    x86_64-linux = "sha256-5LyDQrxAuW1S3qzeEnODNP7TPhc+KzsjW8j84yobhoE=";
-    aarch64-linux = "sha256-HjkAcIJ9/4ulSJsRAhj23FSb2+1viIPV+4/JFTtVNiA=";
-    x86_64-darwin = "sha256-q2qLngKmWvoPwkVafQ8os+sxz2jmeU5mt0E48R0vUao=";
-    aarch64-darwin = "sha256-Hzcy0b99PLWkNt3W6g71QxGtQx9v8DDHjLdCp5EmugM=";
+    x86_64-linux = "sha256-gjaT7IM73+HZlRLtN/9YBHwWqoF0FsZFDiOfzd69BQM=";
+    aarch64-linux = "sha256-sjIO4iMPowyI/ho/pPpEfpno18pjhfKr45Htvj4xl74=";
+    x86_64-darwin = "sha256-Gjwu8V1I3MRyKhwnbvlTIRwvjF573O2QrHKeBWRFy9s=";
+    aarch64-darwin = "sha256-4kSXyo563hKH0ZhtSa5EoSiY0x7Go+a/NpjllGKdE8I=";
   };
 in
 {
@@ -177,10 +184,14 @@ in
   ];
   nix = lib.mkIf (!isDarwin) {
     package = pkgs.nix;
-    settings.experimental-features = [
-      "nix-command"
-      "flakes"
-    ];
+    settings = {
+      experimental-features = [
+        "nix-command"
+        "flakes"
+      ];
+      # no user namespaces under proot, so the build sandbox can't be set up
+      sandbox = false;
+    };
   };
 
   home = {
@@ -209,7 +220,7 @@ in
       devenv
       ec
       fd
-      fzf
+      ffmpeg-headless
       gibo
       git-xet
       jaq
@@ -221,7 +232,6 @@ in
       weave
       witr
     ]
-    ++ lib.optionals (!isDarwin) [ waypipe ]
     ++ lib.optionals (!isTermux && !isDarwin) [ podman-compose ];
 
   services = lib.mkIf (!isDarwin) {
@@ -273,6 +283,11 @@ in
         side-by-side = !isTermux;
         hyperlinks = true;
       };
+    };
+    fzf = {
+      enable = true;
+      # keep the patched eval in zshConfig instead
+      enableZshIntegration = false;
     };
     git = {
       enable = true;
@@ -375,12 +390,17 @@ in
       settings = {
         editor = {
           auto-format = true;
+          auto-save = {
+            after-delay.enable = true;
+            after-delay.timeout = 60000;
+          };
           bufferline = "multiple";
           cursor-shape = {
             insert = "bar";
             normal = "block";
             select = "underline";
           };
+          soft-wrap.enable = true;
           trim-trailing-whitespace = true;
           trim-final-newlines = true;
         };
@@ -425,6 +445,16 @@ in
         mgr = {
           show_hidden = true;
         };
+        open.prepend_rules = [
+          {
+            mime = "text/*";
+            use = [
+              "edit"
+              "open"
+              "reveal"
+            ];
+          }
+        ];
       };
       initLua = ''
         Status:children_add(function()
@@ -485,7 +515,7 @@ in
               }
             ''}
             PROMPT='> '
-            RPROMPT='${if isTermux then "$(_prompt_pwd)" else "%~"}$(git_prompt_info)'
+            RPROMPT='${if isTermux then "$(_prompt_pwd)" else "%~"}$(git_prompt_info) %F{8}%?%f'
           '';
           ctrlzToggle = lib.mkOrder 1400 ''
             function fancy-ctrl-z() {
@@ -500,7 +530,20 @@ in
             zle -N fancy-ctrl-z
             bindkey '^Z' fancy-ctrl-z
           '';
-          zshConfig = lib.mkOrder 1500 ''eval "$(fzf --zsh| sed -e '/zmodload/s/perl/perl_off/' -e '/selected/s/fc -rl/fc -rlt "%y-%m-%d"/')"'';
+          zshConfig = lib.mkOrder 1500 ''
+            export FZF_CTRL_R_OPTS="--with-nth 2.. --nth ..-3"
+            __fzf_hist_fmt() {
+              awk -v w=$((COLUMNS-3)) '{
+                if (match($0, /^[ \t]*[0-9]+\**[ \t]+[^ \t]+[ \t]+/) == 0) { print; next }
+                n=$1; d=$2
+                cmd=substr($0, RLENGTH+1)
+                pad=w-length(cmd)-length(d)-length(n)-2
+                if (pad<2) pad=2
+                printf "%s  %s%"pad"s%s  %s\n", n, cmd, "", d, n
+              }'
+            }
+            eval "$(fzf --zsh| sed -e '/zmodload/s/perl/perl_off/' -e '/selected/s/fc -rl/fc -rlt "%y-%m-%d"/' -e '/scheme=history/s/FZF_DEFAULT_OPTS/__fzf_hist_fmt | FZF_DEFAULT_OPTS/')"
+          '';
         in
         lib.mkMerge [
           kardanTheme
@@ -555,6 +598,8 @@ in
             "WebSearch"
             "WebFetch"
           ];
+          cleanupPeriodDays = 365;
+          autoCompactEnabled = false;
         }
       );
       target = "${homeDirectory}/.claude/settings.json";
