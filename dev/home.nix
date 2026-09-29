@@ -26,6 +26,17 @@ let
     && pkgs.stdenv.hostPlatform.isAarch64
     && !config.systemd.user.enable
     && !config.targets.genericLinux.gpu.enable;
+  hmName = if isDarwin then "mac" else "${username}@${if isTermux then "android" else "linux"}";
+  hmTarget =
+    if isDarwin then
+      "darwinConfigurations.${hmName}.system"
+    else
+      ''homeConfigurations."${hmName}".activationPackage'';
+  hmSwitch =
+    if isDarwin then
+      ''sudo darwin-rebuild switch --impure --flake "$HOME/.config/home-manager#${hmName}"''
+    else
+      ''NIXPKGS_ALLOW_UNFREE=1 home-manager switch --impure --flake "$HOME/.config/home-manager#${hmName}"'';
   claudeStatusLine = pkgs.writeShellScript "claude-statusline" ''
     # Format: dirname | Model | branch | ██░░░░░░░░ 18% of 200k tokens
     IFS= read -r -d "" json_input || true
@@ -206,6 +217,7 @@ in
       BASH_ENV = "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh";
     };
     shellAliases = {
+      hmu = lib.mkDefault hmSwitch;
       g = "git";
       dinit = ''devenv init && printf '%s\n' '#!/usr/bin/env bash' 'export DIRENV_WARN_TIMEOUT=20s' 'eval "$(devenv direnvrc)"' 'use devenv' > .envrc && direnv allow'';
     };
@@ -555,6 +567,33 @@ in
         mkcd = ''mkdir -p "$1" && cd "$1"'';
         tch = ''mkdir -p "$(dirname "$@")" && touch "$@"'';
         git = ''${gitHooksWrapper} "$(whence -p git)" "$@"'';
+        # dry-run against nixpkgs-unstable head (or $1), list packages missing from cache
+        hmc = ''
+          local rev="$1" log
+          [[ -n "$rev" ]] || rev=$(curl -fsSL https://channels.nixos.org/nixpkgs-unstable/git-revision) || return
+          print "nixpkgs $rev"
+          nix flake prefetch "github:NixOS/nixpkgs/$rev" || return
+          log=$(mktemp)
+          NIXPKGS_ALLOW_UNFREE=1 nix build "$HOME/.config/home-manager#"'${hmTarget}' --impure --dry-run \
+            --override-input nixpkgs "github:NixOS/nixpkgs/$rev" >|"$log" 2>&1 || { cat "$log"; rm -f "$log"; return 1 }
+          grep -E 'will be (built|fetched)' "$log"
+          awk '/will be built/{f=1;next}/will be fetched/{f=0}f' "$log" \
+            | sed -E 's|^ +/nix/store/[a-z0-9]{32}-||; s|\.drv$||' \
+            | grep -E -- '-[0-9]+(\.[0-9]+)+' | sort
+          rm -f "$log"
+        '';
+        # hmc, pin nixpkgs to the checked rev, update other inputs, hmu
+        hmuu = ''
+          local flake="$HOME/.config/home-manager" rev="$1"
+          [[ -n "$rev" ]] || rev=$(curl -fsSL https://channels.nixos.org/nixpkgs-unstable/git-revision) || return
+          hmc "$rev" || return
+          read -q "?:: Proceed with upgrade? [y/N] " || { print; return 1 }
+          print
+          ${pkgs.gnused}/bin/sed -i -E 's|(nixpkgs\.url = "nixpkgs/)[0-9a-f]+|\1'"$rev"'|' "$flake/flake.nix"
+          grep -q "nixpkgs/$rev" "$flake/flake.nix" || { print "nixpkgs pin not found in flake.nix"; return 1 }
+          nix flake update --flake "$flake" || return
+          ${config.home.shellAliases.hmu}
+        '';
       };
       prezto = {
         enable = true;

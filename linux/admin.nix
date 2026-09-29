@@ -420,7 +420,6 @@
           cpuMax = "15";
         in
         {
-          hmu = "nix flake update --flake ~/.config/home-manager && NIXPKGS_ALLOW_UNFREE=1 home-manager switch --flake \"$HOME/.config/home-manager#${username}@linux\" --impure";
           sd = "sudo shutdown now";
           rb = "sudo reboot now";
           cputoggle = ''

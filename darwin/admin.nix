@@ -304,7 +304,6 @@ in
         nixpkgs.config.allowUnfree = true;
 
         home.sessionVariables.SUDO_EDITOR = "$HOME/.nix-profile/bin/hx";
-        home.shellAliases.hmu = "nix flake update --flake ~/.config/home-manager && sudo darwin-rebuild switch --impure --flake \"$HOME/.config/home-manager#mac\"";
         home.file.".hushlogin".text = "";
         home.packages = with pkgs; [
           # apple/container: Nix profiles don't link /libexec, so the apiserver
