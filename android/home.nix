@@ -11,6 +11,9 @@
 {
   imports = [ ../dev/home.nix ];
 
+  # no user namespaces under proot, so the build sandbox can't be set up
+  nix.settings.sandbox = false;
+
   nixpkgs.config = {
     users.defaultUserShell = pkgs.zsh;
   };
@@ -98,6 +101,7 @@
     enable = true;
     autoEnable = false;
     targets = {
+      bat.enable = true;
       fzf.enable = true;
       gitui.enable = true;
       yazi.enable = true;

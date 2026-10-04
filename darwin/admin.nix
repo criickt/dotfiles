@@ -123,11 +123,18 @@ in
     user = username;
     autoMigrate = true;
     enableRosetta = false;
+    enableZshIntegration = false;
+  };
+
+  programs.zsh = {
+    enableGlobalCompInit = false;
+    enableBashCompletion = false;
+    promptInit = "";
   };
 
   homebrew = {
     enable = true;
-    enableZshIntegration = true;
+    enableZshIntegration = false;
     onActivation = {
       autoUpdate = true;
       upgrade = true;
@@ -303,7 +310,10 @@ in
         home.stateVersion = "26.11";
         nixpkgs.config.allowUnfree = true;
 
-        home.sessionVariables.SUDO_EDITOR = "$HOME/.nix-profile/bin/hx";
+        home.sessionVariables = {
+          SUDO_EDITOR = "${config.home.profileDirectory}/bin/hx";
+          LIMA_HOME = "$HOME/.local/share/lima";
+        };
         home.file.".hushlogin".text = "";
         home.packages = with pkgs; [
           # apple/container: Nix profiles don't link /libexec, so the apiserver
@@ -396,16 +406,22 @@ in
 
         stylix = {
           enable = true;
-          autoEnable = false;
           base16Scheme = "${pkgs.base16-schemes}/share/themes/da-one-ocean.yaml";
           polarity = "dark";
-          targets = {
-            kitty.enable = true;
-            yazi.enable = true;
-            fzf.enable = true;
-            gitui.enable = true;
-            zellij.enable = true;
-          };
+          targets = lib.genAttrs [
+            "helix" # uses its own theme (mkForce above)
+            # linux/GUI-only targets that would otherwise write files on macOS
+            "gtk"
+            "gtksourceview"
+            "gedit"
+            "xresources"
+            "x11"
+            "sxiv"
+            "blender"
+            "vencord"
+            "forge"
+            "font-packages"
+          ] (_: { enable = false; });
         };
       };
   };
