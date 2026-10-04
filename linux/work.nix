@@ -1,4 +1,5 @@
 {
+  config,
   lib,
   pkgs,
   username,
@@ -21,15 +22,14 @@
     stateVersion = "25.05";
     sessionVariables = {
       TERM = "xterm-256color";
-      SUDO_EDITOR = "$HOME/.nix-profile/bin/hx";
+      SUDO_EDITOR = "${config.home.profileDirectory}/bin/hx";
     };
     shellAliases = {
       hmu = "NIXPKGS_ALLOW_UNFREE=1 home-manager switch --flake 'path:${homeDirectory}/.config/home-manager#work@linux' --impure";
     };
+    packages = with pkgs; [
+    ];
   };
-
-  home.packages = with pkgs; [
-  ];
 
   systemd.user = {
     enable = true;
