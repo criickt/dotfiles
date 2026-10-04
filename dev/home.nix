@@ -38,7 +38,7 @@ let
     else
       ''NIXPKGS_ALLOW_UNFREE=1 home-manager switch --impure --flake "$HOME/.config/home-manager#${hmName}"'';
   claudeStatusLine = pkgs.writeShellScript "claude-statusline" ''
-    # Format: dirname | Model | branch | ██░░░░░░░░ 18% of 200k tokens
+    # Format: █░░░░░░░░░ 18% of 200k tok. | branch | dirname | Model
     IFS= read -r -d "" json_input || true
 
     current_dir=""
@@ -106,20 +106,21 @@ let
       local pct=$(( (used * 100 + usable / 2) / usable ))
       [[ "$pct" -gt 100 ]] && pct=100
       local bar_len=10
-      local filled=$(( (pct * bar_len + 50) / 100 ))
+      local filled=$(( pct * bar_len / 100 ))
       local empty=$(( bar_len - filled ))
       local bar=""
       for ((i=0; i<filled; i++)); do bar+="█"; done
       for ((i=0; i<empty; i++)); do bar+="░"; done
       local max_display
       if [[ "$max" -ge 1000 ]]; then max_display="$(( max / 1000 ))k"; else max_display="$max"; fi
-      echo "$bar ''${pct}% of ''${max_display} tokens"
+      echo "$bar ''${pct}% of ''${max_display} tok."
     }
 
-    parts=("$dir_name" "$model_name")
-    [[ -n "$git_branch" ]] && parts+=("$git_branch")
+    parts=()
     token_bar=$(build_bar "$context_used" "$context_size")
     [[ -n "$token_bar" ]] && parts+=("$token_bar")
+    [[ -n "$git_branch" ]] && parts+=("$git_branch")
+    parts+=("$dir_name" "$model_name")
 
     result=""
     for part in "''${parts[@]}"; do
@@ -127,124 +128,84 @@ let
     done
     echo "$result"
   '';
-  weaveVersion = "0.5.4";
-  weaveTargets = {
-    x86_64-linux = "x86_64-unknown-linux-gnu";
-    aarch64-linux = "aarch64-unknown-linux-gnu";
-    x86_64-darwin = "x86_64-apple-darwin";
-    aarch64-darwin = "aarch64-apple-darwin";
-  };
-  weavePkg =
-    binary: hashes:
-    let
-      system = pkgs.stdenv.hostPlatform.system;
-    in
-    pkgs.stdenv.mkDerivation {
-      pname = "weave-${binary}";
-      version = weaveVersion;
-      src = pkgs.fetchurl {
-        url = "https://github.com/Ataraxy-Labs/weave/releases/download/v${weaveVersion}/weave-${binary}-${weaveTargets.${system}}.tar.gz";
-        hash = hashes.${system};
-      };
-      sourceRoot = ".";
-      nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.autoPatchelfHook ];
-      buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.stdenv.cc.cc.lib ];
-      installPhase =
-        let
-          binaryName = if binary == "cli" then "weave" else "weave-${binary}";
-        in
-        ''
-          install -Dm755 ${binaryName} $out/bin/${binaryName}
-        ''
-        + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
-          for lib in libssl.3.dylib libcrypto.3.dylib; do
-            for prefix in /opt/homebrew /usr/local; do
-              install_name_tool -change "$prefix/opt/openssl@3/lib/$lib" "${pkgs.openssl.out}/lib/$lib" $out/bin/${binaryName}
-            done
-          done
-        '';
-    };
-  weave = weavePkg "cli" {
-    x86_64-linux = "sha256-k7n6A+cUr4CR9MKKhse6gNmAPVoH0ZbEYBlgrVFCbfw=";
-    aarch64-linux = "sha256-6MwhreAcj5tmWzx/NEZ4Zr5yMgy8VKchZlV+5QJEDnE=";
-    x86_64-darwin = "sha256-YCXqjhmw0ldYN+Hu8uskKoZCX0QUyBpllvlH7EbI0IA=";
-    aarch64-darwin = "sha256-bogOt6A4+9I8Lo33vU3tF+6cBPvx7fyLbQM2RHmwnYc=";
-  };
-  weaveDriver = weavePkg "driver" {
-    x86_64-linux = "sha256-gjaT7IM73+HZlRLtN/9YBHwWqoF0FsZFDiOfzd69BQM=";
-    aarch64-linux = "sha256-sjIO4iMPowyI/ho/pPpEfpno18pjhfKr45Htvj4xl74=";
-    x86_64-darwin = "sha256-Gjwu8V1I3MRyKhwnbvlTIRwvjF573O2QrHKeBWRFy9s=";
-    aarch64-darwin = "sha256-4kSXyo563hKH0ZhtSa5EoSiY0x7Go+a/NpjllGKdE8I=";
-  };
 in
 {
-  imports = lib.optional (builtins.pathExists personalFile) personalFile;
-  nixpkgs.overlays = [
-    (final: prev: {
-      ec = prev.ec.overrideAttrs (old: rec {
-        version = "0.3.1";
-        src = prev.fetchFromGitHub {
-          owner = "chojs23";
-          repo = "ec";
-          rev = "v${version}";
-          hash = "sha256-tnOr0AVPwEm9gONa7gl3TzhPC5/1WEAbW7Ew5/mNn5U=";
+  imports = lib.optional (builtins.pathExists personalFile) personalFile ++ [
+    (
+      { config, ... }:
+      {
+        programs.direnv = {
+          enable = true;
+          enableZshIntegration = false;
+          nix-direnv.enable = true;
         };
-        vendorHash = "sha256-bV5y8zKculYULkFl9J95qebLOzdTT/LuYycqMmHKZ+g=";
-      });
+        programs.zsh.initContent = "source ${
+          pkgs.runCommandLocal "direnv-hook.zsh" { } ''
+            ${lib.getExe config.programs.direnv.package} hook zsh > $out
+          ''
+        }";
+      }
+    )
+  ];
+  nix = lib.mkMerge [
+    (lib.mkIf (!isDarwin) {
+      package = pkgs.nix;
+      settings = {
+        use-xdg-base-directories = true;
+        experimental-features = [
+          "nix-command"
+          "flakes"
+        ];
+      };
     })
   ];
-  nix = lib.mkIf (!isDarwin) {
-    package = pkgs.nix;
-    settings = {
-      experimental-features = [
-        "nix-command"
-        "flakes"
-      ];
-      # no user namespaces under proot, so the build sandbox can't be set up
-      sandbox = false;
-    };
-  };
 
+  xdg = {
+    enable = true;
+    localBinInPath = true;
+    configFile."curl/.curlrc".text = "proto-default = https\n";
+  };
   home = {
     preferXdgDirectories = true;
     sessionVariables = {
       CARGO_HOME = "$HOME/.cache/cargo";
+      ANDROID_USER_HOME = "$HOME/.local/share/android";
       GRADLE_USER_HOME = "$HOME/.cache";
       BUILDAH_FORMAT = "docker";
       DOCKER_CONFIG = "$HOME/.config/docker";
       CURL_HOME = "$HOME/.config/curl";
+      MANPAGER = "sh -c 'col -bx | bat -l man -p'";
+      MANROFFOPT = "-c";
       # Source HM session vars for non-interactive bash scripts (#!/bin/bash)
-      BASH_ENV = "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh";
+      BASH_ENV = "${config.home.profileDirectory}/etc/profile.d/hm-session-vars.sh";
     };
     shellAliases = {
       hmu = lib.mkDefault hmSwitch;
       g = "git";
       dinit = ''devenv init && printf '%s\n' '#!/usr/bin/env bash' 'export DIRENV_WARN_TIMEOUT=20s' 'eval "$(devenv direnvrc)"' 'use devenv' > .envrc && direnv allow'';
     };
+    packages =
+      with pkgs;
+      [
+        age
+        ffmpeg-headless
+        gibo
+        git-xet
+        jaq
+        (pkgs.writeShellScriptBin "jq" ''exec jaq "$@"'')
+        jless
+        pv
+        libqalculate
+        ffsend
+        qrcp
+        tlrc
+        tree
+        watchexec
+        weave
+        witr
+      ]
+      ++ lib.optionals (!isTermux && !isDarwin) [ podman-compose ];
   };
-
-  xdg.configFile."curl/.curlrc".text = "proto-default = https\n";
-
-  home.packages =
-    with pkgs;
-    [
-      age
-      devenv
-      ec
-      fd
-      ffmpeg-headless
-      gibo
-      git-xet
-      jaq
-      (pkgs.writeShellScriptBin "jq" ''exec jaq "$@"'')
-      pv
-      ripgrep
-      tlrc
-      tree
-      weave
-      witr
-    ]
-    ++ lib.optionals (!isTermux && !isDarwin) [ podman-compose ];
 
   services = lib.mkIf (!isDarwin) {
     podman = lib.mkIf (!isTermux) {
@@ -260,8 +221,47 @@ in
   programs = {
     home-manager.enable = true;
     nix-index-database.comma.enable = true;
+    bat = {
+      enable = true;
+      extraPackages = with pkgs.bat-extras; [
+        batman
+        batgrep
+        batdiff
+      ];
+    };
+    devenv = {
+      enable = true;
+      # auto-activation hook would compete with direnv `use devenv`
+      enableZshIntegration = false;
+      enableBashIntegration = false;
+    };
+    ec = {
+      enable = true;
+      enableGitIntegration = true;
+    };
+    fd.enable = true;
+    ripgrep.enable = true;
+    # pulls pandoc + full ffmpeg
+    ripgrep-all.enable = !isTermux;
     claude-code = {
       enable = true;
+      mutableSettings = true;
+      settings = {
+        statusLine = {
+          type = "command";
+          command = "${claudeStatusLine}";
+        };
+        attribution = {
+          commit = "";
+          pr = "";
+        };
+        permissions.allow = [
+          "WebSearch"
+          "WebFetch"
+        ];
+        cleanupPeriodDays = 365;
+        autoCompactEnabled = false;
+      };
       # package = pkgs.claude-code.overrideAttrs (old: rec {
       #   version = "2.0.64";
       #   src = pkgs.fetchurl {
@@ -300,6 +300,7 @@ in
       enable = true;
       # keep the patched eval in zshConfig instead
       enableZshIntegration = false;
+      fileWidget.options = [ "--preview 'bat --color=always --style=numbers --line-range=:300 {}'" ];
     };
     git = {
       enable = true;
@@ -324,8 +325,10 @@ in
       lfs.enable = true;
       attributes = [ "* merge=weave" ];
       settings = {
-        user.email = lib.mkDefault "johndoe@example.com";
-        user.name = lib.mkDefault "John Doe";
+        user = {
+          email = lib.mkDefault "johndoe@example.com";
+          name = lib.mkDefault "John Doe";
+        };
         column.ui = "auto";
         branch.sort = "-committerdate";
         tag.sort = "version:refname";
@@ -362,16 +365,9 @@ in
         };
         merge = {
           conflictStyle = "zdiff3";
-          tool = "ec";
           weave = {
             name = "Entity-level semantic merge";
-            driver = "${weaveDriver}/bin/weave-driver %O %A %B %L %P";
-          };
-        };
-        mergetool = {
-          ec = {
-            cmd = ''ec "$BASE" "$LOCAL" "$REMOTE" "$MERGED"'';
-            trustExitCode = true;
+            driver = "${pkgs.weave}/bin/weave-driver %O %A %B %L %P";
           };
         };
         rebase = {
@@ -402,9 +398,9 @@ in
       settings = {
         editor = {
           auto-format = true;
-          auto-save = {
-            after-delay.enable = true;
-            after-delay.timeout = 60000;
+          auto-save.after-delay = {
+            enable = true;
+            timeout = 60000;
           };
           bufferline = "multiple";
           cursor-shape = {
@@ -416,18 +412,18 @@ in
           trim-trailing-whitespace = true;
           trim-final-newlines = true;
         };
-        keys.normal = {
-          "C-s" = ":w";
-          "A-e" = "insert_mode";
-          "A-tab" = ":buffer-next";
-        };
-        keys.insert = {
-          "C-s" = ":w";
-          "A-e" = "normal_mode";
-          "A-tab" = ":buffer-next";
-        };
-        keys.select = {
-          "A-tab" = ":buffer-next";
+        keys = {
+          normal = {
+            "C-s" = ":w";
+            "A-e" = "insert_mode";
+            "A-tab" = ":buffer-next";
+          };
+          insert = {
+            "C-s" = ":w";
+            "A-e" = "normal_mode";
+            "A-tab" = ":buffer-next";
+          };
+          select."A-tab" = ":buffer-next";
         };
       };
       languages = {
@@ -444,19 +440,26 @@ in
         ];
       };
     };
-    direnv = {
-      enable = true;
-      enableZshIntegration = true;
-      nix-direnv.enable = true;
-    };
     yazi = {
       enable = true;
       shellWrapperName = "y";
       enableZshIntegration = true;
+      plugins.piper = pkgs.yaziPlugins.piper;
       settings = {
         mgr = {
           show_hidden = true;
         };
+        plugin.prepend_previewers =
+          map
+            (mime: {
+              inherit mime;
+              run = ''piper -- bat -p --color=always "$1"'';
+            })
+            [
+              "text/*"
+              "*/{xml,javascript,wine-extension-ini}"
+              "application/{json,ndjson}"
+            ];
         open.prepend_rules = [
           {
             mime = "text/*";
@@ -469,6 +472,13 @@ in
         ];
       };
       initLua = ''
+        local function fmt_time(t)
+        	if not t or t == 0 then
+        		return "-"
+        	end
+        	return os.date("%Y.%m.%d %H:%M", math.floor(t))
+        end
+
         Status:children_add(function()
         	local h = cx.active.current.hovered
         	if not h or ya.target_family() ~= "unix" then
@@ -476,6 +486,10 @@ in
         	end
 
         	return ui.Line {
+        		ui.Span("M " .. fmt_time(h.cha.mtime)):fg("blue"),
+        		" ",
+        		ui.Span("B " .. fmt_time(h.cha.btime)):fg("blue"),
+        		" ",
         		ui.Span(ya.user_name(h.cha.uid) or tostring(h.cha.uid)):fg("magenta"),
         		":",
         		ui.Span(ya.group_name(h.cha.gid) or tostring(h.cha.gid)):fg("magenta"),
@@ -491,7 +505,7 @@ in
       dotDir = "${config.xdg.configHome}/zsh";
       envExtra = ''
         # global git hooks
-        fpath+=($HOME/.nix-profile/share/zsh/site-functions)
+        fpath+=(${config.home.profileDirectory}/share/zsh/site-functions)
         autoload -Uz git
       '';
       localVariables = {
@@ -554,7 +568,11 @@ in
                 printf "%s  %s%"pad"s%s  %s\n", n, cmd, "", d, n
               }'
             }
-            eval "$(fzf --zsh| sed -e '/zmodload/s/perl/perl_off/' -e '/selected/s/fc -rl/fc -rlt "%y-%m-%d"/' -e '/scheme=history/s/FZF_DEFAULT_OPTS/__fzf_hist_fmt | FZF_DEFAULT_OPTS/')"
+            source ${
+              pkgs.runCommandLocal "fzf-init.zsh" { } ''
+                ${lib.getExe config.programs.fzf.package} --zsh | sed -e '/zmodload/s/perl/perl_off/' -e '/selected/s/fc -rl/fc -rlt "%y-%m-%d"/' -e '/scheme=history/s/FZF_DEFAULT_OPTS/__fzf_hist_fmt | FZF_DEFAULT_OPTS/' > $out
+              ''
+            }
           '';
         in
         lib.mkMerge [
@@ -620,38 +638,6 @@ in
       enableZshIntegration = false;
     };
   };
-
-  home.activation.claudeSettings =
-    let
-      declarative = pkgs.writeText "claude-settings-declarative.json" (
-        builtins.toJSON {
-          statusLine = {
-            type = "command";
-            command = "${claudeStatusLine}";
-          };
-          attribution = {
-            commit = "";
-            pr = "";
-          };
-          permissions.allow = [
-            "WebSearch"
-            "WebFetch"
-          ];
-          cleanupPeriodDays = 365;
-          autoCompactEnabled = false;
-        }
-      );
-      target = "${homeDirectory}/.claude/settings.json";
-    in
-    lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      if [ -f "${target}" ]; then
-        cp "${target}" "${target}.bak"
-        { cat "${target}"; cat ${declarative}; } | ${pkgs.jaq}/bin/jaq -s '.[0] * .[1]' > "${target}.tmp"
-        mv "${target}.tmp" "${target}"
-      else
-        install -Dm644 ${declarative} "${target}"
-      fi
-    '';
 
   manual = {
     html.enable = true;

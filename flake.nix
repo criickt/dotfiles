@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "nixpkgs/f45c6f04c2f013f004bf94e284e95d72898d9393";
+    nixpkgs.url = "nixpkgs/6dadaf4375be35033e1c84395adbd53ff5fded96";
     nix-darwin = {
       url = "github:nix-darwin/nix-darwin/master";
       inputs.nixpkgs.follows = "nixpkgs";

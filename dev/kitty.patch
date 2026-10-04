@@ -1,0 +1,12 @@
+--- a/kitty/fonts.c
++++ b/kitty/fonts.c
+@@ -885,7 +885,8 @@
+                 return BLANK_FONT;
+             *is_emoji_presentation = has_emoji_presentation(cpu_cell, lc);
+             ans = in_symbol_maps(fg, lc->chars[0]);
+-            if (ans > -1) return ans;
++            // A symbol_map font is only a preference: fall through when it lacks the glyph instead of drawing its .notdef
++            if (ans > -1 && has_cell_text((bool (*)(const void *, char_type))face_has_codepoint, (fg->fonts + ans)->face, false, lc)) return ans;
+             switch (gpu_cell->attrs.bold | (gpu_cell->attrs.italic << 1)) {
+                 case 0: ans = fg->medium_font_idx; break;
+                 case 1: ans = fg->bold_font_idx; break;

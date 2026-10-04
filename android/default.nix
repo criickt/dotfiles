@@ -8,11 +8,7 @@ let
 in inputs.home-manager.lib.homeManagerConfiguration {
   inherit pkgs;
 
-  extraSpecialArgs = {
-    inherit inputs;
-    inherit username;
-    inherit homeDirectory;
-  };
+  extraSpecialArgs = { inherit inputs username homeDirectory; };
 
   modules = [ inputs.stylix.homeModules.stylix inputs.nix-index-database.homeModules.nix-index ./home.nix ];
 }

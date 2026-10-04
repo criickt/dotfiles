@@ -13,10 +13,51 @@
   imports = [ ../dev/home.nix ../dev/gui.nix ];
   targets.genericLinux.enable = true;
 
-  home.username = username;
-  home.homeDirectory = homeDirectory;
-  home.sessionVariables = {
-    SUDO_EDITOR = "$HOME/.nix-profile/bin/hx";
+  home = {
+    inherit username homeDirectory;
+    stateVersion = "25.05"; # Please read the comment before changing.
+    sessionVariables = {
+      SUDO_EDITOR = "${config.home.profileDirectory}/bin/hx";
+    };
+    file.".local/bin/zsh-cycle-jobs" = {
+      executable = true;
+      text = ''
+        #!/bin/sh
+        pid=$(cat /tmp/zsh_cycle_pid 2>/dev/null) || exit 0
+        echo $$ >| /tmp/zsh_cycle_token
+        tpgid=$(ps -o tpgid= -p "$pid" 2>/dev/null | tr -d ' ')
+        pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
+        [ -n "$tpgid" ] && [ "$tpgid" != "$pgid" ] && kill -TSTP -"$tpgid" 2>/dev/null
+        sleep 0.05
+        kill -USR1 "$pid" 2>/dev/null
+      '';
+    };
+    packages = with pkgs; [
+      brightnessctl
+      grim
+      hyprpicker
+      ripdrag
+      slurp
+      wl-screenrec
+      wl-clipboard
+      tor-browser
+      qbittorrent-enhanced
+
+      android-tools
+      binsider
+      bluetui
+      exiv2
+      go-chromecast
+      htop
+      libarchive
+      mediainfo
+      netcat
+      tesseract
+
+      inter
+      nerd-fonts.symbols-only
+      nerd-fonts.bigblue-terminal
+    ];
   };
 
   nixpkgs.config = {
@@ -64,49 +105,7 @@
         defaultApplications = makeDefaults "librewolf" browserTypes;
       };
     };
-  home.stateVersion = "25.05"; # Please read the comment before changing.
   fonts.fontconfig.enable = true;
-
-  home.file.".local/bin/zsh-cycle-jobs" = {
-    executable = true;
-    text = ''
-      #!/bin/sh
-      pid=$(cat /tmp/zsh_cycle_pid 2>/dev/null) || exit 0
-      echo $$ >| /tmp/zsh_cycle_token
-      tpgid=$(ps -o tpgid= -p "$pid" 2>/dev/null | tr -d ' ')
-      pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
-      [ -n "$tpgid" ] && [ "$tpgid" != "$pgid" ] && kill -TSTP -"$tpgid" 2>/dev/null
-      sleep 0.05
-      kill -USR1 "$pid" 2>/dev/null
-    '';
-  };
-
-  home.packages = with pkgs; [
-    brightnessctl
-    grim
-    hyprpicker
-    ripdrag
-    slurp
-    wl-screenrec
-    wl-clipboard
-    tor-browser
-    qbittorrent-enhanced
-
-    android-tools
-    binsider
-    bluetui
-    exiv2
-    go-chromecast
-    htop
-    libarchive
-    mediainfo
-    netcat
-    tesseract
-
-    inter
-    nerd-fonts.symbols-only
-    nerd-fonts.bigblue-terminal
-  ];
 
   wayland.windowManager.hyprland =
     let
@@ -127,8 +126,10 @@
       enable = true;
       configType = "hyprlang";
       package = pkgs.hyprland;
-      systemd.enableXdgAutostart = true;
-      systemd.variables = [ "--all" ];
+      systemd = {
+        enableXdgAutostart = true;
+        variables = [ "--all" ];
+      };
       plugins = [
         #pkgs.hyprlandPlugins.hyprwinwrap
         pkgs.hyprlandPlugins.hypr-dynamic-cursors
@@ -732,7 +733,6 @@
 
   stylix = {
     enable = true;
-    targets.kde.enable = false;
     image = pkgs.fetchurl {
       url = "https://images.unsplash.com/photo-1765707886539-6d57024ddc2f";
       hash = "sha256-5B+znuF1860cuLMn5eyob7ZGaSmlgTNATgb3A6xD87U=";
@@ -765,7 +765,10 @@
       };
     };
     polarity = "dark";
-    targets.helix.enable = false;
-    targets.hyprlock.enable = false;
+    targets = {
+      kde.enable = false;
+      helix.enable = false;
+      hyprlock.enable = false;
+    };
   };
 }

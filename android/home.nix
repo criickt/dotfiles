@@ -11,13 +11,18 @@
 {
   imports = [ ../dev/home.nix ];
 
+  # no user namespaces under proot, so the build sandbox can't be set up
+  nix.settings.sandbox = false;
+
   nixpkgs.config = {
     users.defaultUserShell = pkgs.zsh;
   };
+
   targets.genericLinux = {
     enable = true;
     gpu.enable = false;
   };
+
   home = {
     inherit username homeDirectory;
     stateVersion = "25.05";
@@ -36,48 +41,47 @@
         hmu = "NIXPKGS_ALLOW_UNFREE=1 NIX_CONFIG='sandbox = false' home-manager switch --flake \"$HOME/.config/home-manager#${username}@android\" --impure && nix profile wipe-history && home-manager expire-generations '-1 second' && ${nixGc}";
         sshpw = "SSH_ASKPASS_REQUIRE=never ssh -o PubkeyAuthentication=no -o PreferredAuthentications=keyboard-interactive,password";
       };
-  };
-
-  home.packages = with pkgs; [
-    iconv # needed for zsh
-  ];
-
-  home.file = {
-    "termux-ssh-askpass" = {
-      source = ./termux-ssh-askpass;
-      target = ".local/bin/termux-ssh-askpass";
-      executable = true;
-    };
-    # taken from nix-on-droid stylix integration
-    # it wont work as intended bc you log in to vanilla termux, and this is symlink to prooted nix path
-    # therefore you should manually create regular file without .lnk after each change
-    ".termux/colors.properties.lnk".text = lib.concatStringsSep "\n" [
-      "background = #${config.lib.stylix.colors.base00}"
-      "foreground = #${config.lib.stylix.colors.base05}"
-      "cursor = #${config.lib.stylix.colors.base05}"
-      "# normal"
-      "color0 = #${config.lib.stylix.colors.base00}"
-      "color1 = #${config.lib.stylix.colors.base08}"
-      "color2 = #${config.lib.stylix.colors.base0B}"
-      "color3 = #${config.lib.stylix.colors.base0A}"
-      "color4 = #${config.lib.stylix.colors.base0D}"
-      "color5 = #${config.lib.stylix.colors.base0E}"
-      "color6 = #${config.lib.stylix.colors.base0C}"
-      "color7 = #${config.lib.stylix.colors.base05}"
-      "# bright"
-      "color8 = #${config.lib.stylix.colors.base02}"
-      "color9 = #${config.lib.stylix.colors.base08}"
-      "color10 = #${config.lib.stylix.colors.base0B}"
-      "color11 = #${config.lib.stylix.colors.base0A}"
-      "color12 = #${config.lib.stylix.colors.base0D}"
-      "color13 = #${config.lib.stylix.colors.base0E}"
-      "color14 = #${config.lib.stylix.colors.base0C}"
-      "color15 = #${config.lib.stylix.colors.base07}"
+    packages = with pkgs; [
+      iconv # needed for zsh
     ];
+    file = {
+      "termux-ssh-askpass" = {
+        source = ./termux-ssh-askpass;
+        target = ".local/bin/termux-ssh-askpass";
+        executable = true;
+      };
+      # taken from nix-on-droid stylix integration
+      # it wont work as intended bc you log in to vanilla termux, and this is symlink to prooted nix path
+      # therefore you should manually create regular file without .lnk after each change
+      ".termux/colors.properties.lnk".text = lib.concatStringsSep "\n" [
+        "background = #${config.lib.stylix.colors.base00}"
+        "foreground = #${config.lib.stylix.colors.base05}"
+        "cursor = #${config.lib.stylix.colors.base05}"
+        "# normal"
+        "color0 = #${config.lib.stylix.colors.base00}"
+        "color1 = #${config.lib.stylix.colors.base08}"
+        "color2 = #${config.lib.stylix.colors.base0B}"
+        "color3 = #${config.lib.stylix.colors.base0A}"
+        "color4 = #${config.lib.stylix.colors.base0D}"
+        "color5 = #${config.lib.stylix.colors.base0E}"
+        "color6 = #${config.lib.stylix.colors.base0C}"
+        "color7 = #${config.lib.stylix.colors.base05}"
+        "# bright"
+        "color8 = #${config.lib.stylix.colors.base02}"
+        "color9 = #${config.lib.stylix.colors.base08}"
+        "color10 = #${config.lib.stylix.colors.base0B}"
+        "color11 = #${config.lib.stylix.colors.base0A}"
+        "color12 = #${config.lib.stylix.colors.base0D}"
+        "color13 = #${config.lib.stylix.colors.base0E}"
+        "color14 = #${config.lib.stylix.colors.base0C}"
+        "color15 = #${config.lib.stylix.colors.base07}"
+      ];
+    };
   };
 
   programs = {
     home-manager.enable = true;
+    direnv.package = pkgs.direnv.overrideAttrs (_: { doCheck = false; });
     zsh = {
       initContent =
         let
@@ -88,8 +92,11 @@
   };
 
   gtk.enable = false;
+
   systemd.user.enable = false;
+
   qt.enable = false;
+
   xdg.portal.enable = false;
 
   news.display = "silent";
@@ -98,6 +105,7 @@
     enable = true;
     autoEnable = false;
     targets = {
+      bat.enable = true;
       fzf.enable = true;
       gitui.enable = true;
       yazi.enable = true;

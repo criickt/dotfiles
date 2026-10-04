@@ -1,0 +1,49 @@
+--- a/kitty/child.py
++++ b/kitty/child.py
+@@ -651,9 +651,10 @@
+             if sid < 0:
+                 return []
+             ans: list[ProcessDesc] = []
++            wrapper_pid = self.pid if self.kitty_wrappers and self.root_pid != self.pid else None
+             for grp_id, pids in gmap.items():
+                 if grp_id != foreground_process_group_id and session_id(pids) == sid:
+-                    ans.extend(map(self.process_desc, pids))
++                    ans.extend(self.process_desc(p) for p in pids if p != wrapper_pid)
+             return ans
+         except Exception:
+             return []
+--- a/kitty/core_text.m
++++ b/kitty/core_text.m
+@@ -1185,14 +1185,18 @@
+     ensure_render_space(canvas_width, cell_height, num_glyphs);
+     CGRect br = CTFontGetBoundingRectsForGlyphs(ct_font, kCTFontOrientationHorizontal, buffers.glyphs, buffers.boxes, num_glyphs);
+     const bool debug_rendering = false;
++    // Color glyphs keep the main font's pt size whatever the cell height, so fit them vertically as well
++    float top = *was_colored ? br.origin.y + br.size.height : 0, bottom = *was_colored ? -br.origin.y : 0;
+     if (allow_resize) {
+         // Resize glyphs that would bleed into neighboring cells, by scaling the font size
+-        float right = 0;
++        float right = 0, scale = 1;
+         for (unsigned i = 0; i < num_glyphs; i++) right = MAX(right, buffers.boxes[i].origin.x + buffers.boxes[i].size.width);
+-        if (!bold && !italic && right > canvas_width + 1) {
++        if (!bold && !italic && right > canvas_width + 1) scale = canvas_width / right;
++        if (top + bottom > cell_height) scale = MIN(scale, cell_height / (top + bottom));
++        if (scale < 1) {
+             if (debug_rendering) printf("resizing glyphs, right: %f canvas_width: %u\n", right, canvas_width);
+             CGFloat sz = CTFontGetSize(ct_font);
+-            sz *= canvas_width / right;
++            sz *= scale;
+             CTFontRef new_font = CTFontCreateCopyWithAttributes(ct_font, sz, NULL, NULL);
+             bool ret = do_render(
+                 new_font,
+@@ -1235,7 +1239,9 @@
+         y += hb_positions[i].y_advance * scale;
+     }
+     if (*was_colored) {
+-        render_color_glyph(ct_font, (uint8_t *)canvas, info[0].codepoint, cell_width * num_cells, cell_height, baseline);
++        unsigned int b = baseline;
++        if (top > b) b = MIN((unsigned int)ceilf(top), cell_height - (unsigned int)ceilf(bottom));
++        render_color_glyph(ct_font, (uint8_t *)canvas, info[0].codepoint, cell_width * num_cells, cell_height, b);
+     } else {
+         render_glyphs(ct_font, canvas_width, cell_height, baseline, num_glyphs);
+         Region src = {.bottom = cell_height, .right = canvas_width}, dest = {.bottom = cell_height, .right = canvas_width};

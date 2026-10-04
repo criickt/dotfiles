@@ -57,7 +57,10 @@ in
   };
 
   nix = {
-    settings.experimental-features = "nix-command flakes";
+    settings = {
+      experimental-features = "nix-command flakes";
+      use-xdg-base-directories = true;
+    };
     gc = {
       automatic = true;
       interval = [
@@ -123,11 +126,18 @@ in
     user = username;
     autoMigrate = true;
     enableRosetta = false;
+    enableZshIntegration = false;
+  };
+
+  programs.zsh = {
+    enableGlobalCompInit = false;
+    enableBashCompletion = false;
+    promptInit = "";
   };
 
   homebrew = {
     enable = true;
-    enableZshIntegration = true;
+    enableZshIntegration = false;
     onActivation = {
       autoUpdate = true;
       upgrade = true;
@@ -240,6 +250,7 @@ in
         ...
       }:
       let
+        lastSession = "${config.xdg.stateHome}/kitty/last.kitty-session";
         kdbxDir = "${config.home.homeDirectory}/Documents/keepass";
         keepassxcSync = pkgs.writeShellScript "keepassxc-git-push" ''
           set -euo pipefail
@@ -260,7 +271,7 @@ in
         ccsessionsBackup = pkgs.writeShellScript "ccsessions-backup" ''
           set -euo pipefail
           export PATH=/usr/bin:/bin
-          SRC="${config.home.homeDirectory}/.claude/projects"
+          SRC="${config.programs.claude-code.configDir}/projects"
           DST="${config.home.homeDirectory}/Code/ccsessions"
           [ -d "$SRC" ] || exit 0
           mkdir -p "$DST"
@@ -300,29 +311,36 @@ in
           ../dev/gui.nix
         ];
 
-        home.stateVersion = "26.11";
         nixpkgs.config.allowUnfree = true;
 
-        home.sessionVariables.SUDO_EDITOR = "$HOME/.nix-profile/bin/hx";
-        home.file.".hushlogin".text = "";
-        home.packages = with pkgs; [
-          # apple/container: Nix profiles don't link /libexec, so the apiserver
-          # can't find its plugins unless CONTAINER_INSTALL_ROOT points at the package root
-          (symlinkJoin {
-            name = "container-wrapped";
-            paths = [ container ];
-            nativeBuildInputs = [ makeWrapper ];
-            postBuild = ''
-              for b in container container-apiserver; do
-                wrapProgram "$out/bin/$b" --set CONTAINER_INSTALL_ROOT "${container}"
-              done
-            '';
-          })
-          htop
-          iina
-          qbittorrent-enhanced
-          xz
-        ];
+        home = {
+          stateVersion = "26.11";
+          sessionVariables = {
+            SUDO_EDITOR = "${config.home.profileDirectory}/bin/hx";
+            LIMA_HOME = "$HOME/.local/share/lima";
+          };
+          file.".hushlogin".text = "";
+          packages = with pkgs; [
+            # apple/container: Nix profiles don't link /libexec, so the apiserver
+            # can't find its plugins unless CONTAINER_INSTALL_ROOT points at the package root
+            (symlinkJoin {
+              name = "container-wrapped";
+              paths = [ container ];
+              nativeBuildInputs = [ makeWrapper ];
+              postBuild = ''
+                for b in container container-apiserver; do
+                  wrapProgram "$out/bin/$b" --set CONTAINER_INSTALL_ROOT "${container}"
+                done
+              '';
+            })
+            htop
+            iina
+            (qbittorrent-enhanced.overrideAttrs (old: {
+              NIX_CFLAGS_COMPILE = toString (old.NIX_CFLAGS_COMPILE or "") + " -Wno-deprecated-pragma";
+            }))
+            xz
+          ];
+        };
 
         xdg.configFile."mpv/mpv.conf".text = toMpvConf (mpvSettings // { sub-font-size = 20; }) + "\n";
 
@@ -335,12 +353,15 @@ in
         programs = {
           codex.enable = true;
           helix.settings.theme = lib.mkForce "nyxvamp-obsidian";
-          kitty.settings = {
-            startup_session = toString (
-              pkgs.writeText "kitty-fullscreen.session" "os_window_state fullscreen\n"
-            );
-            macos_option_as_alt = "yes";
-            confirm_os_window_close = 2;
+          kitty = {
+            settings = {
+              macos_option_as_alt = "yes";
+              confirm_os_window_close = "-1 count-background";
+              restore_session_after_logout = "yes";
+              startup_session = lastSession;
+            };
+            keybindings."cmd+q" =
+              "combine : save_as_session --save-only --os-window-geometry ${lastSession} : quit";
           };
           yazi.settings.opener = {
             reveal = [
@@ -368,44 +389,56 @@ in
           };
         };
 
-        launchd.agents.keepassxc-sync = {
-          enable = true;
-          config = {
-            ProgramArguments = [ "${keepassxcSync}" ];
-            WatchPaths = [ "${kdbxDir}/darwin.kdbx" ];
-            EnvironmentVariables.GIT_SSH_COMMAND = "ssh -i ${config.home.homeDirectory}/.ssh/backup.pub";
-            StandardOutPath = "${config.home.homeDirectory}/Library/Logs/keepassxc-sync.log";
-            StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/keepassxc-sync.log";
+        launchd.agents = {
+          keepassxc-sync = {
+            enable = true;
+            config = {
+              ProgramArguments = [ "${keepassxcSync}" ];
+              WatchPaths = [ "${kdbxDir}/darwin.kdbx" ];
+              EnvironmentVariables.GIT_SSH_COMMAND = "ssh -i ${config.home.homeDirectory}/.ssh/backup.pub";
+              StandardOutPath = "${config.home.homeDirectory}/Library/Logs/keepassxc-sync.log";
+              StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/keepassxc-sync.log";
+            };
           };
-        };
-
-        launchd.agents.ccsessions-backup = {
-          enable = true;
-          config = {
-            ProgramArguments = [ "${ccsessionsBackup}" ];
-            # WatchPaths is non-recursive: it only fires when a project dir is
-            # added/removed; StartInterval is what catches in-place appends.
-            WatchPaths = [ "${config.home.homeDirectory}/.claude/projects" ];
-            StartInterval = 14400;
-            ThrottleInterval = 14400;
-            RunAtLoad = true;
-            StandardOutPath = "${config.home.homeDirectory}/Library/Logs/ccsessions-backup.log";
-            StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/ccsessions-backup.log";
+          ccsessions-backup = {
+            enable = true;
+            config = {
+              ProgramArguments = [ "${ccsessionsBackup}" ];
+              # WatchPaths is non-recursive: it only fires when a project dir is
+              # added/removed; StartInterval is what catches in-place appends.
+              WatchPaths = [ "${config.programs.claude-code.configDir}/projects" ];
+              StartInterval = 14400;
+              ThrottleInterval = 14400;
+              RunAtLoad = true;
+              StandardOutPath = "${config.home.homeDirectory}/Library/Logs/ccsessions-backup.log";
+              StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/ccsessions-backup.log";
+            };
           };
         };
 
         stylix = {
           enable = true;
-          autoEnable = false;
           base16Scheme = "${pkgs.base16-schemes}/share/themes/da-one-ocean.yaml";
           polarity = "dark";
-          targets = {
-            kitty.enable = true;
-            yazi.enable = true;
-            fzf.enable = true;
-            gitui.enable = true;
-            zellij.enable = true;
-          };
+          targets =
+            lib.genAttrs
+              [
+                "helix" # uses its own theme (mkForce above)
+                # linux/GUI-only targets that would otherwise write files on macOS
+                "gtk"
+                "gtksourceview"
+                "gedit"
+                "xresources"
+                "x11"
+                "sxiv"
+                "blender"
+                "vencord"
+                "forge"
+                "font-packages"
+              ]
+              (_: {
+                enable = false;
+              });
         };
       };
   };

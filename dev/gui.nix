@@ -1,4 +1,5 @@
 {
+  config,
   lib,
   pkgs,
   ...
@@ -24,9 +25,10 @@ let
     '';
   };
 
-  # Darwin covers only CP437, no Cyrillic; Terminus-16 Smooth fills it via symbol_map
+  # Darwin covers only Latin-1; Terminus-16 Bold Smooth shares its 12/4 pixel grid and 2px strokes and takes
+  # every other glyph it has (kitty patched to fall through when a symbol_map font lacks the glyph)
   consoleet-terminus = pkgs.stdenvNoCC.mkDerivation {
-    pname = "consoleet-terminus";
+    pname = "consoleet-terminus-16";
     version = "4.49.1";
     src = pkgs.fetchurl {
       url = "https://inai.de/files/consoleet/consoleet-terminus-4.49.1.tar.zst";
@@ -57,6 +59,7 @@ let
 in
 {
   _module.args.mpvSettings = mpvSettings;
+  xdg.configFile."kitty/shaders/crt.pipeline".text = "startgroup\n    shaders crt\nendgroup\n";
   home.packages = [
     consoleet
     consoleet-terminus
@@ -69,12 +72,24 @@ in
         NIX_CFLAGS_COMPILE =
           (old.NIX_CFLAGS_COMPILE or "")
           + (if isDarwin then " -mcpu=native -mtune=native" else " -march=native -mtune=native");
+        patches = (old.patches or [ ]) ++ [ ./kitty.patch ] ++ lib.optional isDarwin ../darwin/kitty-darwin.patch;
       });
       shellIntegration.enableZshIntegration = true;
+      extraConfig = lib.mkIf (config.stylix.enable or false) (
+        lib.mkAfter (
+          with config.lib.stylix.colors.withHashtag;
+          ''
+            tab_bar_background ${base00}
+            inactive_tab_background ${base00}
+            active_tab_background ${base00}
+            inactive_tab_foreground ${base02}
+          ''
+        )
+      );
       settings = {
         font_family = lib.mkForce "Consoleet Darwin Smooth";
-        font_size = lib.mkForce (if isDarwin then 20 else 14);
-        symbol_map = "U+0400-U+052F,U+2DE0-U+2DFF,U+A640-U+A69F Consoleet Terminus-16 Smooth";
+        font_size = lib.mkForce (if isDarwin then 24 else 14);
+        symbol_map = "U+0100-U+10FFFF Consoleet Terminus-16 Smooth";
         tab_bar_edge = "top";
         enable_audio_bell = 0;
         tab_bar_style = "separator";
@@ -88,6 +103,7 @@ in
         cursor_trail_decay = "0.07 0.15";
         wheel_scroll_multiplier = 5;
         touch_scroll_multiplier = 5;
+        custom_shaders = "crt";
       };
       keybindings =
         let
@@ -100,7 +116,8 @@ in
         in
         {
           "${mod}+t" = "new_tab";
-          "${closeBind}" = "close_tab";
+          "${mod}+shift+t" = "new_tab_with_cwd";
+          "${closeBind}" = "remote_control close-tab";
           "${mod}+," = "move_tab_backward";
           "${mod}+." = "move_tab_forward";
           "ctrl+tab" = "next_tab";
