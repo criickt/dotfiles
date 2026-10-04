@@ -11,13 +11,20 @@
 {
   imports = [ ../dev/home.nix ];
 
+  # no user namespaces under proot, so the build sandbox can't be set up
+  nix.settings.sandbox = false;
+
+  programs.direnv.package = pkgs.direnv.overrideAttrs (_: { doCheck = false; });
+
   nixpkgs.config = {
     users.defaultUserShell = pkgs.zsh;
   };
+
   targets.genericLinux = {
     enable = true;
     gpu.enable = false;
   };
+
   home = {
     inherit username homeDirectory;
     stateVersion = "25.05";
@@ -88,8 +95,11 @@
   };
 
   gtk.enable = false;
+
   systemd.user.enable = false;
+
   qt.enable = false;
+
   xdg.portal.enable = false;
 
   news.display = "silent";
@@ -98,6 +108,7 @@
     enable = true;
     autoEnable = false;
     targets = {
+      bat.enable = true;
       fzf.enable = true;
       gitui.enable = true;
       yazi.enable = true;

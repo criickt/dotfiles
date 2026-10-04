@@ -127,83 +127,37 @@ let
     done
     echo "$result"
   '';
-  weaveVersion = "0.5.4";
-  weaveTargets = {
-    x86_64-linux = "x86_64-unknown-linux-gnu";
-    aarch64-linux = "aarch64-unknown-linux-gnu";
-    x86_64-darwin = "x86_64-apple-darwin";
-    aarch64-darwin = "aarch64-apple-darwin";
-  };
-  weavePkg =
-    binary: hashes:
-    let
-      system = pkgs.stdenv.hostPlatform.system;
-    in
-    pkgs.stdenv.mkDerivation {
-      pname = "weave-${binary}";
-      version = weaveVersion;
-      src = pkgs.fetchurl {
-        url = "https://github.com/Ataraxy-Labs/weave/releases/download/v${weaveVersion}/weave-${binary}-${weaveTargets.${system}}.tar.gz";
-        hash = hashes.${system};
-      };
-      sourceRoot = ".";
-      nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.autoPatchelfHook ];
-      buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.stdenv.cc.cc.lib ];
-      installPhase =
-        let
-          binaryName = if binary == "cli" then "weave" else "weave-${binary}";
-        in
-        ''
-          install -Dm755 ${binaryName} $out/bin/${binaryName}
-        ''
-        + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
-          for lib in libssl.3.dylib libcrypto.3.dylib; do
-            for prefix in /opt/homebrew /usr/local; do
-              install_name_tool -change "$prefix/opt/openssl@3/lib/$lib" "${pkgs.openssl.out}/lib/$lib" $out/bin/${binaryName}
-            done
-          done
-        '';
-    };
-  weave = weavePkg "cli" {
-    x86_64-linux = "sha256-k7n6A+cUr4CR9MKKhse6gNmAPVoH0ZbEYBlgrVFCbfw=";
-    aarch64-linux = "sha256-6MwhreAcj5tmWzx/NEZ4Zr5yMgy8VKchZlV+5QJEDnE=";
-    x86_64-darwin = "sha256-YCXqjhmw0ldYN+Hu8uskKoZCX0QUyBpllvlH7EbI0IA=";
-    aarch64-darwin = "sha256-bogOt6A4+9I8Lo33vU3tF+6cBPvx7fyLbQM2RHmwnYc=";
-  };
-  weaveDriver = weavePkg "driver" {
-    x86_64-linux = "sha256-gjaT7IM73+HZlRLtN/9YBHwWqoF0FsZFDiOfzd69BQM=";
-    aarch64-linux = "sha256-sjIO4iMPowyI/ho/pPpEfpno18pjhfKr45Htvj4xl74=";
-    x86_64-darwin = "sha256-Gjwu8V1I3MRyKhwnbvlTIRwvjF573O2QrHKeBWRFy9s=";
-    aarch64-darwin = "sha256-4kSXyo563hKH0ZhtSa5EoSiY0x7Go+a/NpjllGKdE8I=";
-  };
 in
 {
-  imports = lib.optional (builtins.pathExists personalFile) personalFile;
-  nixpkgs.overlays = [
-    (final: prev: {
-      ec = prev.ec.overrideAttrs (old: rec {
-        version = "0.3.1";
-        src = prev.fetchFromGitHub {
-          owner = "chojs23";
-          repo = "ec";
-          rev = "v${version}";
-          hash = "sha256-tnOr0AVPwEm9gONa7gl3TzhPC5/1WEAbW7Ew5/mNn5U=";
+  imports = lib.optional (builtins.pathExists personalFile) personalFile ++ [
+    (
+      { config, ... }:
+      {
+        programs.direnv = {
+          enable = true;
+          enableZshIntegration = false;
+          nix-direnv.enable = true;
         };
-        vendorHash = "sha256-bV5y8zKculYULkFl9J95qebLOzdTT/LuYycqMmHKZ+g=";
-      });
+        programs.zsh.initContent = "source ${
+          pkgs.runCommandLocal "direnv-hook.zsh" { } ''
+            ${lib.getExe config.programs.direnv.package} hook zsh > $out
+          ''
+        }";
+      }
+    )
+  ];
+  nix = lib.mkMerge [
+    { settings.use-xdg-base-directories = true; }
+    (lib.mkIf (!isDarwin) {
+      package = pkgs.nix;
+      settings = {
+        experimental-features = [
+          "nix-command"
+          "flakes"
+        ];
+      };
     })
   ];
-  nix = lib.mkIf (!isDarwin) {
-    package = pkgs.nix;
-    settings = {
-      experimental-features = [
-        "nix-command"
-        "flakes"
-      ];
-      # no user namespaces under proot, so the build sandbox can't be set up
-      sandbox = false;
-    };
-  };
 
   home = {
     preferXdgDirectories = true;
@@ -213,8 +167,10 @@ in
       BUILDAH_FORMAT = "docker";
       DOCKER_CONFIG = "$HOME/.config/docker";
       CURL_HOME = "$HOME/.config/curl";
+      MANPAGER = "sh -c 'col -bx | bat -l man -p'";
+      MANROFFOPT = "-c";
       # Source HM session vars for non-interactive bash scripts (#!/bin/bash)
-      BASH_ENV = "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh";
+      BASH_ENV = "${config.home.profileDirectory}/etc/profile.d/hm-session-vars.sh";
     };
     shellAliases = {
       hmu = lib.mkDefault hmSwitch;
@@ -229,18 +185,19 @@ in
     with pkgs;
     [
       age
-      devenv
-      ec
-      fd
       ffmpeg-headless
       gibo
       git-xet
       jaq
       (pkgs.writeShellScriptBin "jq" ''exec jaq "$@"'')
+      jless
       pv
-      ripgrep
+      libqalculate
+      ffsend
+      qrcp
       tlrc
       tree
+      watchexec
       weave
       witr
     ]
@@ -260,6 +217,28 @@ in
   programs = {
     home-manager.enable = true;
     nix-index-database.comma.enable = true;
+    bat = {
+      enable = true;
+      extraPackages = with pkgs.bat-extras; [
+        batman
+        batgrep
+        batdiff
+      ];
+    };
+    devenv = {
+      enable = true;
+      # auto-activation hook would compete with direnv `use devenv`
+      enableZshIntegration = false;
+      enableBashIntegration = false;
+    };
+    ec = {
+      enable = true;
+      enableGitIntegration = true;
+    };
+    fd.enable = true;
+    ripgrep.enable = true;
+    # pulls pandoc + full ffmpeg
+    ripgrep-all.enable = !isTermux;
     claude-code = {
       enable = true;
       # package = pkgs.claude-code.overrideAttrs (old: rec {
@@ -300,6 +279,7 @@ in
       enable = true;
       # keep the patched eval in zshConfig instead
       enableZshIntegration = false;
+      fileWidget.options = [ "--preview 'bat --color=always --style=numbers --line-range=:300 {}'" ];
     };
     git = {
       enable = true;
@@ -362,16 +342,9 @@ in
         };
         merge = {
           conflictStyle = "zdiff3";
-          tool = "ec";
           weave = {
             name = "Entity-level semantic merge";
-            driver = "${weaveDriver}/bin/weave-driver %O %A %B %L %P";
-          };
-        };
-        mergetool = {
-          ec = {
-            cmd = ''ec "$BASE" "$LOCAL" "$REMOTE" "$MERGED"'';
-            trustExitCode = true;
+            driver = "${pkgs.weave}/bin/weave-driver %O %A %B %L %P";
           };
         };
         rebase = {
@@ -444,19 +417,26 @@ in
         ];
       };
     };
-    direnv = {
-      enable = true;
-      enableZshIntegration = true;
-      nix-direnv.enable = true;
-    };
     yazi = {
       enable = true;
       shellWrapperName = "y";
       enableZshIntegration = true;
+      plugins.piper = pkgs.yaziPlugins.piper;
       settings = {
         mgr = {
           show_hidden = true;
         };
+        plugin.prepend_previewers =
+          map
+            (mime: {
+              inherit mime;
+              run = ''piper -- bat -p --color=always "$1"'';
+            })
+            [
+              "text/*"
+              "*/{xml,javascript,wine-extension-ini}"
+              "application/{json,ndjson}"
+            ];
         open.prepend_rules = [
           {
             mime = "text/*";
@@ -469,6 +449,13 @@ in
         ];
       };
       initLua = ''
+        local function fmt_time(t)
+        	if not t or t == 0 then
+        		return "-"
+        	end
+        	return os.date("%Y.%m.%d %H:%M", math.floor(t))
+        end
+
         Status:children_add(function()
         	local h = cx.active.current.hovered
         	if not h or ya.target_family() ~= "unix" then
@@ -476,6 +463,10 @@ in
         	end
 
         	return ui.Line {
+        		ui.Span("M " .. fmt_time(h.cha.mtime)):fg("blue"),
+        		" ",
+        		ui.Span("B " .. fmt_time(h.cha.btime)):fg("blue"),
+        		" ",
         		ui.Span(ya.user_name(h.cha.uid) or tostring(h.cha.uid)):fg("magenta"),
         		":",
         		ui.Span(ya.group_name(h.cha.gid) or tostring(h.cha.gid)):fg("magenta"),
@@ -491,7 +482,7 @@ in
       dotDir = "${config.xdg.configHome}/zsh";
       envExtra = ''
         # global git hooks
-        fpath+=($HOME/.nix-profile/share/zsh/site-functions)
+        fpath+=(${config.home.profileDirectory}/share/zsh/site-functions)
         autoload -Uz git
       '';
       localVariables = {
@@ -554,7 +545,11 @@ in
                 printf "%s  %s%"pad"s%s  %s\n", n, cmd, "", d, n
               }'
             }
-            eval "$(fzf --zsh| sed -e '/zmodload/s/perl/perl_off/' -e '/selected/s/fc -rl/fc -rlt "%y-%m-%d"/' -e '/scheme=history/s/FZF_DEFAULT_OPTS/__fzf_hist_fmt | FZF_DEFAULT_OPTS/')"
+            source ${
+              pkgs.runCommandLocal "fzf-init.zsh" { } ''
+                ${lib.getExe config.programs.fzf.package} --zsh | sed -e '/zmodload/s/perl/perl_off/' -e '/selected/s/fc -rl/fc -rlt "%y-%m-%d"/' -e '/scheme=history/s/FZF_DEFAULT_OPTS/__fzf_hist_fmt | FZF_DEFAULT_OPTS/' > $out
+              ''
+            }
           '';
         in
         lib.mkMerge [

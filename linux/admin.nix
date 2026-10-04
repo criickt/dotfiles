@@ -16,7 +16,7 @@
   home.username = username;
   home.homeDirectory = homeDirectory;
   home.sessionVariables = {
-    SUDO_EDITOR = "$HOME/.nix-profile/bin/hx";
+    SUDO_EDITOR = "${config.home.profileDirectory}/bin/hx";
   };
 
   nixpkgs.config = {
